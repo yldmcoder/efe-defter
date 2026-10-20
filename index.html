@@ -250,7 +250,7 @@ textarea.short{min-height:92px}
 </div>
 <div id="lightbox" hidden></div>
 <div id="toast" role="status" hidden></div>
-<script>
+<script type="text/plain" id="js-tr">
 (function(){
 "use strict";
 var $=function(s){return document.querySelector(s)};
@@ -294,7 +294,7 @@ var DEFAULT_CHECKLIST=["Toolbox talk signed","Hazards and work area checked","Wo
 var HOLD_DEFAULT=["Şartname ve addenda alındı","Submittal (malzeme onay) dosyaları onaylandı","Mevcut kotlar ölçüldü","GPR / post-tension taraması yapıldı","Çöp ve şaft (chute) planı kararlaştırıldı","CSP7'ye kazıma kabul edildi","Tamirler ölçüldü, danışman imzaladı","Önerilen kotlar danışman tarafından onaylandı","Topping dökümü yapıldı, kür devam ediyor","PUMA öncesi nem ve çiğ noktası kontrol edildi","PUMA uygulandı ve kürlendi","Kapılar, merdivenler ve kart okuyucu tamamlandı","Son kontrol ve eksik listesi (punch list)"];
 var READ_TYPES=["Concrete","Moisture","Dew point","CSP / surface","Elevation / slope","PUMA","Repair","Other"];
 var TAGS=["Önce","Sırasında","Sonra","Sorun"];
-var TABS=[["home","Ana sayfa"],["notes","Notlar"],["projects","Projeler"],["gallery","Proje galerisi"],["options","Ayarlar"],["export","Dışa aktar"]];
+var TABS=[["home","Ana sayfa"],["notes","Notlar"],["schedule","Program"],["projects","Projeler"],["files","Proje dosyaları"],["gallery","Proje galerisi"],["search","Ara"],["options","Ayarlar"],["export","Dışa aktar"]];
 var LS="efe-sitediary-v1";
 var IDB=null,docs={},blobs={},persist="loading",readyFile=null,installEvt=null;
 var tab="home",curDate=today(),curProject=null,galFilter="all",galTag="all",expState={from:"",to:"",project:"all",photos:false};
@@ -338,8 +338,8 @@ var chains={},assets=null,dl=null,persistedState="bilinmiyor";
 function setPersist(p){persist=p;var s=$("#sync");if(s)s.textContent=(p==="saved"?"telefonda kayıtlı":p==="saving"?"kaydediliyor":p==="error"?"kaydedilmedi":"loading")+(typeof syLabel==="function"?syLabel():"")}
 function idbOpen(){
   return new Promise(function(res,rej){
-    var r=indexedDB.open("efe-sitediary",1);
-    r.onupgradeneeded=function(){var d=r.result;d.createObjectStore("docs");d.createObjectStore("blobs")};
+    var r=indexedDB.open("efe-sitediary",2);
+    r.onupgradeneeded=function(){var d=r.result;["docs","blobs","files"].forEach(function(n){if(!d.objectStoreNames.contains(n))d.createObjectStore(n)})};
     r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)};
   });
 }
@@ -459,7 +459,7 @@ var ICONS={
   export:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 21h14"/>',
   bolt:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
   mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
-  pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>'
+  pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>',schedule:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',files:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
 };
 function icon(n){
   var s=document.createElementNS("http://www.w3.org/2000/svg","svg");
@@ -483,7 +483,7 @@ function render(){
   document.querySelectorAll(".tab").forEach(function(b){
     if(b.getAttribute("data-tab")===tab)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current");
   });
-  var fn={home:viewHome,notes:viewNotes,projects:viewProjects,gallery:viewGallery,options:viewOptions,export:viewExport}[tab]||viewHome;
+  var fn={home:viewHome,notes:viewNotes,projects:viewProjects,gallery:viewGallery,options:viewOptions,export:viewExport,search:viewSearch,schedule:viewSchedule,files:viewFiles}[tab]||viewHome;
   v.replaceChildren.apply(v,[].concat(fn()));
   var ap=activeProject();
   $("#topTitle").textContent=ap?ap.name:"Şantiye Defteri";
@@ -586,6 +586,7 @@ function viewHome(){
     h("div",{class:"row"},
       h("button",{class:"btn primary round",type:"button",onclick:function(){go("notes")}},icon("bolt"),"Not yaz"),
       assets?h("button",{class:"btn",type:"button",onclick:function(){pickPhotos({pid:ap.id,date:t},true)}},"Fotoğraf çek"):null)));
+  out.push(scheduleHomeCard());
   out.push(remindersCard(ap,true));
   var holds=holdsOf(ap),hd=holds.filter(function(x){return x.done}).length,nextH=holds.filter(function(x){return !x.done})[0];
   out.push(h("div",{class:"card"},
@@ -666,12 +667,14 @@ function remindersCard(ap,full){
     out.push(h("div",{class:"list"},rows));
   }else out.push(h("div",{class:"muted small",text:full?"Henüz yok. Unutmaman gerekenleri ekle: danışmanı aramak, teslimatı kontrol etmek gibi.":"Açık hatırlatıcı yok."}));
   if(full){
+    var tgt=pid,plist=projects().filter(function(p){return !p.archived}).map(function(p){return [p.id,p.name]});
     var ti=h("input",{type:"text",id:"rem-t",placeholder:"Yeni hatırlatıcı","aria-label":"Yeni hatırlatıcı",onkeydown:function(e){if(e.key==="Enter")add()}});
     var di=h("input",{type:"date",id:"rem-d","aria-label":"Tarih"});
     var add=function(){
       var v=ti.value.trim();if(!v)return;keepTyping("rem-t");
-      saveRems(pid,remsOf(docs[pid]).concat([{i:"r_"+uid8()+Math.random().toString(36).slice(2,5),t:v,due:di.value||"",done:false,created:Date.now()}]));
+      toast("Hatırlatıcı eklendi: "+projName(tgt));saveRems(tgt,remsOf(docs[tgt]).concat([{i:"r_"+uid8()+Math.random().toString(36).slice(2,5),t:v,due:di.value||"",done:false,created:Date.now()}]));
     };
+    out.push(h("label",{class:"f","for":"rem-p"},"Bu hatırlatıcı hangi projeye kaydedilsin?",sel(plist,pid,function(v){tgt=v},"rem-p")));
     out.push(h("div",{class:"row"},h("div",{class:"grow"},ti),h("div",{style:"flex:0 0 160px"},di),h("button",{class:"btn",type:"button",onclick:add},"Ekle")));
   }else{
     out.push(h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:function(){curDate=today();go("notes")}},"Hatırlatıcıları aç")));
@@ -722,10 +725,9 @@ function viewNotes(){
   if(!ap)return out.concat([noProjectCard()]);
   var pid=ap.id;
   var activeList=projects().filter(function(p){return !p.archived}).map(function(p){return [p.id,p.name]});
-  if(activeList.length>1)out.push(h("label",{class:"f","for":"p-sel"},"Proje",sel(activeList,pid,function(v){curProject=v;saveSettings({activeProject:v});render()},"p-sel")));
   if(!noteWhen)noteWhen=localInput(Date.now());
   var mine=allNotes().filter(function(n){return n.projectId===pid});
-  var fixed=placesOf(ap),places=fixed.slice();mine.forEach(function(n){if(n.where&&places.indexOf(n.where)<0)places.push(n.where)});
+  var places=[];mine.forEach(function(n){if(n.where&&places.indexOf(n.where)<0)places.push(n.where)});
   var whenIn=h("input",{type:"datetime-local",id:"n-when",value:noteWhen,"aria-label":"Ne zaman",onchange:function(e){noteWhen=e.target.value}});
   var whereIn=h("input",{type:"text",id:"n-where",list:"n-places",placeholder:"Nerede? ör. Çöp odası 1535, P1 kat",value:noteWhere,"aria-label":"Nerede",oninput:function(e){noteWhere=e.target.value}});
   var ta=h("textarea",{id:"n-text",class:"big",placeholder:"Ne oldu? Yapılan iş, teslimatlar, danışmanın söyledikleri, sorunlar.",value:noteText,"aria-label":"Not",oninput:function(e){noteText=e.target.value}});
@@ -737,8 +739,8 @@ function viewNotes(){
     noteText="";noteWhen="";keepTyping("n-text");toast("Not eklendi");
   }
   out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"p-sel"},"Bu not hangi projeye kaydedilsin?",sel(activeList,pid,function(v){curProject=v;saveSettings({activeProject:v});render()},"p-sel")),
     h("div",{class:"row"},h("label",{class:"f grow","for":"n-where"},"Nerede",whereIn),h("label",{class:"f grow","for":"n-when"},"Ne zaman",whenIn)),
-    placeChips(fixed,whereIn),
     h("datalist",{id:"n-places"},places.map(function(p){return h("option",{value:p})})),
     ta,
     h("div",{class:"row"},
@@ -793,7 +795,7 @@ function viewProjects(){
           remove(p.id);
         })));
   }))));
-  if(ap){out.push(holdsCard(ap));out.push(placesCard(ap))}
+  if(ap){out.push(holdsCard(ap))}
   return out;
 }
 /* places: a fixed list per project, tapped into the note's "Nerede" field */
@@ -994,7 +996,7 @@ function viewOptions(){
       return h("button",{type:"button","aria-pressed":String(s.theme===t[0]),onclick:function(){saveSettings({theme:t[0]})}},t[1]);
     })),
     h("div",{class:"muted small",text:"Otomatik, telefonunun açık ya da koyu ayarını izler."})));
-  out.push(storageCard());out.push(sheetCard());var ic=installCard();if(ic)out.push(ic);
+  out.push(storageCard());out.push(sheetCard());out.push(langCard());var ic=installCard();if(ic)out.push(ic);
   return out;
 }
 
@@ -1071,10 +1073,182 @@ function viewExport(){
   return out;
 }
 
+/* ---------- Ara: tüm projelerde arama ---------- */
+var srchQ="";
+function viewSearch(){
+  var out=[pageHead("Ara","Tüm projelerdeki notlarda, hatırlatıcılarda, onay noktalarında ve fotoğraf notlarında ara.")];
+  var box=h("div",{class:"list"});
+  function fill(){
+    var q=srchQ.trim().toLowerCase();box.replaceChildren();
+    if(q.length<2){box.append(h("div",{class:"muted small",text:"En az 2 harf yaz."}));return}
+    var res=[],has=function(s){return String(s||"").toLowerCase().indexOf(q)>=0};
+    allNotes().forEach(function(n){if(has((n.where||"")+" "+(n.text||"")))res.push({k:"Not",ts:n.ts||0,pid:n.projectId,line:n.text||"",meta:fmt(n.date)+" · "+clock(n.ts)+(n.where?" · "+n.where:"")})});
+    projects().forEach(function(p){
+      remsOf(p).forEach(function(r){if(has(r.t))res.push({k:"Hatırlatıcı",ts:0,pid:p.id,line:r.t,meta:(r.due?fmt(r.due):"tarihsiz")+(r.done?" · bitti":"")})});
+      holdsOf(p).forEach(function(x){if(has(x.t))res.push({k:"Onay noktası",ts:0,pid:p.id,line:x.t,meta:x.done?"bitti":"açık"})});
+    });
+    allSched().forEach(function(x){if(has(x.t))res.push({k:"Program",ts:0,pid:x.pid,line:x.t,meta:fmt(x.date)+(x.time?" · "+x.time:"")+(x.done?" · bitti":"")})});
+    entries("file").forEach(function(f){if(has(f.name))res.push({k:"Dosya",ts:f.ts||0,pid:f.projectId,line:f.name,meta:fmtSize(f.size||0)})});
+    allPhotos().forEach(function(ph){if(has((ph.note||"")+" "+(ph.tag||"")))res.push({k:"Fotoğraf",ts:ph.ts||0,pid:ph.projectId,line:ph.note||ph.tag||"(not yok)",meta:fmt(ph.date)})});
+    res.sort(function(a,b){return b.ts-a.ts});
+    box.append(h("div",{class:"mono small muted",text:res.length+" sonuç"+(res.length>80?" (ilk 80 gösteriliyor)":"")}));
+    res.slice(0,80).forEach(function(r){
+      box.append(h("div",{class:"note"},h("div",{class:"note-h"},h("span",{class:"pill",text:r.k}),h("span",{class:"small muted",text:projName(r.pid)+" · "+r.meta})),h("div",{class:"note-t",text:r.line})));
+    });
+  }
+  var inp=h("input",{type:"text",id:"s-q",placeholder:"Ne arıyorsun? örn. çatlak, beton, danışman","aria-label":"Ara",value:srchQ,oninput:function(e){srchQ=e.target.value;fill()}});
+  fill();
+  out.push(h("div",{class:"card"},inp,box));
+  setTimeout(function(){var i=document.getElementById("s-q");if(i&&tab==="search")i.focus()},80);
+  return out;
+}
+/* ---------- Program: hangi projede ne zaman ne olacak ---------- */
+function schedOf(p){return Array.isArray(p&&p.schedule)?p.schedule:[]}
+function saveSched(pid,list){return save(pid,Object.assign({},docs[pid],{schedule:list}))}
+function allSched(){
+  var out=[];
+  projects().forEach(function(p){schedOf(p).forEach(function(x){out.push(Object.assign({},x,{pid:p.id,pname:p.name,archived:!!p.archived}))})});
+  return out.sort(function(a,b){return ((a.date||"")+(a.time||"99:99")).localeCompare((b.date||"")+(b.time||"99:99"))});
+}
+function schedRow(x){
+  var late=!x.done&&x.date<today();
+  return h("div",{class:"check"+(x.done?" tamam":"")},
+    h("button",{class:"box",type:"button",role:"checkbox","aria-checked":String(!!x.done),"aria-label":x.t,onclick:function(){
+      saveSched(x.pid,schedOf(docs[x.pid]).map(function(y){return y.i===x.i?Object.assign({},y,{done:!y.done}):y}));
+    }},"✓"),
+    h("span",{class:"t",style:"padding:6px 0"},h("b",{text:(x.time?x.time+"  ":"")}),x.t,h("div",{class:"muted small",text:x.pname})),
+    h("span",{class:"pill "+(late?"open":""),text:fmt(x.date)}),
+    h("button",{class:"x",type:"button","aria-label":x.t+" sil",onclick:function(){
+      saveSched(x.pid,schedOf(docs[x.pid]).filter(function(y){return y.i!==x.i}));
+    }},"×"));
+}
+function viewSchedule(){
+  var out=[pageHead("Program","Hangi projede ne zaman ne olacak? Betonlar, teslimatlar, toplantılar, kontroller.")];
+  var ps=projects().filter(function(p){return !p.archived});
+  if(!ps.length)return out.concat([noProjectCard()]);
+  var ap=activeProject(),tgt=ap?ap.id:ps[0].id;
+  var plist=ps.map(function(p){return [p.id,p.name]});
+  var di=h("input",{type:"date",id:"sc-d",value:today(),"aria-label":"Tarih"});
+  var ti=h("input",{type:"time",id:"sc-t","aria-label":"Saat"});
+  var tx=h("input",{type:"text",id:"sc-x",placeholder:"Ne olacak? örn. Beton dökümü, danışman ziyareti, malzeme teslimi","aria-label":"Ne olacak",onkeydown:function(e){if(e.key==="Enter")add()}});
+  function add(){
+    var v=tx.value.trim();if(!v){toast("Ne olacağını yaz.");return}
+    if(!di.value){toast("Tarih seç.");return}
+    keepTyping("sc-x");
+    toast("Programa eklendi: "+projName(tgt));
+    saveSched(tgt,schedOf(docs[tgt]).concat([{i:"s_"+uid8()+Math.random().toString(36).slice(2,5),t:v,date:di.value,time:ti.value||"",done:false,created:Date.now()}]));
+  }
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"sc-p"},"Hangi projede?",sel(plist,tgt,function(v){tgt=v},"sc-p")),
+    h("div",{class:"row"},h("label",{class:"f grow","for":"sc-d"},"Tarih",di),h("label",{class:"f","for":"sc-t"},"Saat (isteğe bağlı)",ti)),
+    h("div",{class:"row"},h("div",{class:"grow"},tx),h("button",{class:"btn primary",type:"button",onclick:add},"Ekle"))));
+  var all=allSched(),t=today();
+  var up=all.filter(function(x){return x.date>=t||!x.done}).filter(function(x){return !x.archived});
+  var past=all.filter(function(x){return x.date<t&&x.done}).reverse().slice(0,30);
+  var body=[],last="";
+  up.forEach(function(x){
+    if(x.date!==last){last=x.date;body.push(h("h3",{class:"dayt",text:(x.date===t?"Bugün · ":"")+dow(x.date)+" · "+fmt(x.date)}))}
+    body.push(schedRow(x));
+  });
+  out.push(h("div",{class:"card"},h("div",{class:"card-head"},h("h2",{text:"Yaklaşan program"}),h("span",{class:"mono small muted",text:up.length+" kayıt"})),
+    up.length?body:h("div",{class:"empty"},h("strong",{text:"Program boş"}),"Yukarıdan ilk kaydı ekle."),
+  ));
+  if(past.length)out.push(h("details",{class:"card"},h("summary",{text:"Geçmiş ("+past.length+")"}),h("div",{class:"list"},past.map(schedRow))));
+  return out;
+}
+function scheduleHomeCard(){
+  var t=today(),end=ymd(new Date(Date.now()+7*864e5));
+  var list=allSched().filter(function(x){return !x.archived&&!x.done&&x.date<=end}).slice(0,8);
+  return h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Program (7 gün)"}),h("span",{class:"mono small muted",text:list.length+" kayıt"})),
+    list.length?h("div",{class:"list"},list.map(schedRow)):h("div",{class:"muted small",text:"Önümüzdeki 7 günde planlı bir şey yok."}),
+    h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:function(){go("schedule")}},"Programı aç")));
+}
+/* ---------- Proje dosyaları: PDF paftalar, şartname, resimler ---------- */
+var fileProj=null,fileView=null;
+function filesOf(pid){return entries("file").filter(function(f){return f.projectId===pid}).sort(function(a,b){return (b.ts||0)-(a.ts||0)})}
+function fmtSize(n){return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB"}
+async function addFiles(list,pid){
+  var n=0;
+  for(var i=0;i<list.length;i++){
+    var f=list[i];
+    try{
+      var id="file_"+uid8()+Math.random().toString(36).slice(2,4);
+      await idbPut("files",id,f);
+      await save(id,{kind:"file",projectId:pid,name:f.name||"dosya",size:f.size||0,type:f.type||"application/pdf",ts:Date.now()});
+      n++;
+    }catch(e){toast(errMsg(e))}
+  }
+  if(n)toast(n+" dosya eklendi");
+}
+function pickFiles(pid){
+  var i=h("input",{type:"file",accept:"application/pdf,image/*,.pdf",multiple:true,style:"display:none"});
+  document.body.append(i);
+  i.addEventListener("change",function(){var f=[].slice.call(i.files);i.remove();if(f.length)addFiles(f,pid)});
+  i.click();
+}
+function closeFileView(){
+  if(fileView){try{URL.revokeObjectURL(fileView.url)}catch(e){}fileView.el.remove();fileView=null}
+}
+async function openFileDoc(id){
+  var d=docs[id],b=await idbGet("files",id);
+  if(!b){toast("Dosya bu telefonda bulunamadı.");return}
+  closeFileView();
+  var typed=b.type?b:new Blob([b],{type:d.type||"application/pdf"});
+  var url=URL.createObjectURL(typed),isImg=/^image\//.test(typed.type);
+  var body=isImg?h("img",{src:url,alt:d.name,style:"max-width:100%;display:block;margin:0 auto"}):h("iframe",{src:url,title:d.name,style:"width:100%;height:100%;border:0;background:#fff"});
+  var el=h("div",{style:"position:fixed;inset:0;z-index:60;background:var(--bg,#fff);display:flex;flex-direction:column"},
+    h("div",{class:"row",style:"padding:10px 12px;border-bottom:1px solid var(--line,#ccc);align-items:center"},
+      h("b",{class:"grow",style:"overflow:hidden;text-overflow:ellipsis;white-space:nowrap",text:d.name}),
+      h("a",{class:"btn primary small",href:url,target:"_blank",rel:"noopener",text:"Yeni sekmede aç"}),
+      h("button",{class:"btn small",type:"button",onclick:function(){saveFile({filename:d.name,data:typed})}},"Paylaş / indir"),
+      h("button",{class:"btn ghost small",type:"button",onclick:closeFileView},"Kapat")),
+    h("div",{style:"flex:1;overflow:auto;-webkit-overflow-scrolling:touch"},body));
+  document.body.append(el);fileView={el:el,url:url};
+}
+function viewFiles(){
+  var out=[pageHead("Proje dosyaları","Pafta, şartname ve diğer PDF'leri projeye ekle. Sahada telefondan aç. Dosyalar sadece bu telefonda durur.")];
+  var ps=projects().filter(function(p){return !p.archived});
+  if(!ps.length)return out.concat([noProjectCard()]);
+  var ap=activeProject();
+  if(!fileProj||!docs[fileProj])fileProj=ap?ap.id:ps[0].id;
+  var plist=ps.map(function(p){return [p.id,p.name]});
+  var list=filesOf(fileProj);
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"fl-p"},"Proje",sel(plist,fileProj,function(v){fileProj=v;render()},"fl-p")),
+    h("div",{class:"row"},h("button",{class:"btn primary",type:"button",onclick:function(){pickFiles(fileProj)}},"Dosya ekle (PDF / resim)"))));
+  out.push(h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Dosyalar"}),h("span",{class:"mono small muted",text:list.length+" dosya"})),
+    list.length?h("div",{class:"list"},list.map(function(f){
+      return h("div",{class:"item"},
+        h("button",{class:"main",type:"button",onclick:function(){openFileDoc(f.id)}},
+          h("b",{text:f.name}),h("span",{class:"muted small",text:fmtSize(f.size||0)+" · "+fmt(ymd(new Date(f.ts||Date.now())))})),
+        h("div",{class:"row"},
+          h("button",{class:"btn small",type:"button",onclick:function(){openFileDoc(f.id)}},"Aç"),
+          arm("Sil",function(){remove(f.id);idbDel("files",f.id)})));
+    })):h("div",{class:"empty"},h("strong",{text:"Henüz dosya yok"}),"Yukarıdan pafta ya da şartname PDF'ini ekle.")));
+  return out;
+}
+/* ---------- Dil / Language ---------- */
+function curLang(){var l="tr";try{l=localStorage.getItem("efe-lang")||"tr"}catch(e){}return l}
+function langCard(){
+  var cur=curLang();
+  function pick(l){
+    if(l===cur)return;
+    try{localStorage.setItem("efe-lang",l)}catch(e){toast("Could not save the language.");return}
+    location.reload();
+  }
+  return h("div",{class:"card"},h("h3",{text:"Dil / Language"}),
+    h("div",{class:"muted small",text:"Uygulama dili"}),
+    h("div",{class:"row"},
+      h("button",{class:"btn"+(cur==="tr"?" primary":""),type:"button","aria-pressed":String(cur==="tr"),onclick:function(){pick("tr")}},"Türkçe"),
+      h("button",{class:"btn"+(cur==="en"?" primary":""),type:"button","aria-pressed":String(cur==="en"),onclick:function(){pick("en")}},"English")));
+}
+
 /* ---------- Google Sheet eşitleme ---------- */
 var SY={busy:false,again:false,timer:null,applying:false,last:0,err:"",live:false};
-var SYT=["projects","notes","reminders","holds","places","photos"];
-var SYF={projects:["name","address","archived"],notes:["date","time","project","where","text"],reminders:["project","text","due","done"],holds:["project","text","done","date"],places:["project","text"],photos:["date","project","note","tag","url"]};
+var SYT=["projects","notes","reminders","schedule","holds","places","photos"];
+var SYF={projects:["name","address","archived"],notes:["date","time","project","where","text"],reminders:["project","text","due","done"],schedule:["project","text","date","time","done"],holds:["project","text","done","date"],places:["project","text"],photos:["date","project","note","tag","url"]};
 function syCfg(){var c=docs._cfg;return c&&c.url&&c.key?c:null}
 function syMeta(){var m=docs._meta||{};return {known:m.known||{},placeIds:m.placeIds||{}}}
 function syQuiet(id,data){docs[id]=data;return IDB?idbPut("docs",id,JSON.parse(JSON.stringify(data))).catch(function(){}):Promise.resolve()}
@@ -1092,10 +1266,10 @@ function syLabel(){
   return SY.busy?" · Sheet eşitleniyor":SY.err?" · Sheet hatası":SY.last?" · Sheet ✓":"";
 }
 function syPaint(){setPersist(persist);if(tab==="options")scheduleRender()}
-function syBackupDocs(){var o={};Object.keys(docs).forEach(function(k){if(k[0]!=="_")o[k]=docs[k]});return o}
+function syBackupDocs(){var o={};Object.keys(docs).forEach(function(k){if(k[0]!=="_"&&!(docs[k]&&docs[k].kind==="file"))o[k]=docs[k]});return o}
 
 function syFlatten(){
-  var out={projects:{},notes:{},reminders:{},holds:{},places:{},photos:{}},m=syMeta();
+  var out={projects:{},notes:{},reminders:{},schedule:{},holds:{},places:{},photos:{}},m=syMeta();
   var nm=function(pid){return docs[pid]&&docs[pid].name?syS(docs[pid].name):""};
   Object.keys(docs).forEach(function(id){
     var d=docs[id];if(!d||id[0]==="_")return;
@@ -1103,6 +1277,7 @@ function syFlatten(){
       var pn=syS(d.name);
       out.projects[id]={name:pn,address:syS(d.address),archived:!!d.archived};
       remsOf(d).forEach(function(r){if(r.i)out.reminders[r.i]={project:pn,text:syS(r.t),due:syS(r.due),done:!!r.done}});
+      schedOf(d).forEach(function(x){if(x.i)out.schedule[x.i]={project:pn,text:syS(x.t),date:syS(x.date),time:syS(x.time),done:!!x.done}});
       holdsOf(d).forEach(function(x){if(x.i)out.holds[x.i]={project:pn,text:syS(x.t),done:!!x.done,date:syS(x.date)}});
       placesOf(d).forEach(function(t){out.places[syPlaceId(id,t,m)]={project:pn,text:syS(t)}});
     }else if(d.kind==="note"){
@@ -1118,10 +1293,11 @@ async function syEnsureIds(){
   var ids=Object.keys(docs);
   for(var a=0;a<ids.length;a++){
     var d=docs[ids[a]];if(!d||d.kind!=="project")continue;
-    var need=remsOf(d).some(function(r){return !r.i})||holdsOf(d).some(function(x){return !x.i});
+    var need=remsOf(d).some(function(r){return !r.i})||holdsOf(d).some(function(x){return !x.i})||schedOf(d).some(function(x){return !x.i});
     if(!need)continue;
     var nd=Object.assign({},d);
     if(d.reminders)nd.reminders=d.reminders.map(function(r){return r.i?r:Object.assign({},r,{i:"r_"+uid8()+Math.random().toString(36).slice(2,5)})});
+    if(d.schedule)nd.schedule=d.schedule.map(function(x){return x.i?x:Object.assign({},x,{i:"s_"+uid8()+Math.random().toString(36).slice(2,5)})});
     if(d.holds)nd.holds=d.holds.map(function(x){return x.i?x:Object.assign({},x,{i:"h_"+uid8()+Math.random().toString(36).slice(2,5)})});
     SY.applying=true;try{await save(ids[a],nd)}finally{SY.applying=false}
   }
@@ -1199,6 +1375,10 @@ function syApply(t,id,r){
     var p1=syProjId(r.project);if(!p1||!r.text)return;
     var o1=syFindItem("reminders",id),old=o1?docs[o1.pid].reminders[o1.idx]:null;
     syPutItem("reminders",p1,id,{i:id,t:r.text,due:r.due,done:!!r.done,created:(old&&old.created)||Date.now()});
+  }else if(t==="schedule"){
+    var p4=syProjId(r.project);if(!p4||!r.text||!/^\d{4}-\d\d-\d\d$/.test(r.date))return;
+    var o4=syFindItem("schedule",id),old4=o4?docs[o4.pid].schedule[o4.idx]:null;
+    syPutItem("schedule",p4,id,{i:id,t:r.text,date:r.date,time:r.time,done:!!r.done,created:(old4&&old4.created)||Date.now()});
   }else if(t==="holds"){
     var p2=syProjId(r.project);if(!p2||!r.text)return;
     syPutItem("holds",p2,id,{i:id,t:r.text,done:!!r.done,date:r.date||null});
@@ -1219,7 +1399,7 @@ function syApply(t,id,r){
 function syDelete(t,id){
   if(t==="projects")return;
   if(t==="notes"){if(docs[id])remove(id)}
-  else if(t==="reminders"||t==="holds"){
+  else if(t==="reminders"||t==="holds"||t==="schedule"){
     var key=t,f=syFindItem(key,id);if(!f)return;
     var o=docs[f.pid],z={};z[key]=o[key].filter(function(x){return x.i!==id});save(f.pid,Object.assign({},o,z));
   }else if(t==="places"){
@@ -1438,6 +1618,1375 @@ async function boot(){
 boot();
 })();
 </script>
+<script type="text/plain" id="js-en">
+(function(){
+"use strict";
+var $=function(s){return document.querySelector(s)};
+function h(tag,attrs){
+  var e=document.createElement(tag),a=attrs||{};
+  Object.keys(a).forEach(function(k){
+    var v=a[k]; if(v==null||v===false) return;
+    if(k==="class") e.className=v;
+    else if(k==="text") e.textContent=v;
+    else if(k.slice(0,2)==="on") e.addEventListener(k.slice(2),v);
+    else if(k==="value") e.value=v;
+    else if(v===true) e.setAttribute(k,"");
+    else e.setAttribute(k,v);
+  });
+  for(var i=2;i<arguments.length;i++){
+    [].concat(arguments[i]).forEach(function(c){
+      if(c==null||c===false) return;
+      e.append(c.nodeType?c:document.createTextNode(String(c)));
+    });
+  }
+  return e;
+}
+function sel(opts,value,onchange,id){
+  var s=h("select",{id:id,onchange:function(){onchange(s.value)}});
+  opts.forEach(function(o){s.append(h("option",{value:o[0],text:o[1]}))});
+  s.value=value; return s;
+}
+
+/* ---------- dates ---------- */
+var pad=function(n){return String(n).padStart(2,"0")};
+var ymd=function(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())};
+var today=function(){return ymd(new Date())};
+var fmt=function(d){return d?d.split("-").reverse().join("/"):""};
+var parts=function(s){return s.split("-").map(Number)};
+var addDays=function(s,n){var p=parts(s);return ymd(new Date(p[0],p[1]-1,p[2]+n))};
+var dow=function(s){var p=parts(s);return new Date(p[0],p[1]-1,p[2]).toLocaleDateString("en-CA",{weekday:"long"})};
+var clock=function(ts){return new Date(ts).toLocaleTimeString("en-CA",{hour:"2-digit",minute:"2-digit"})};
+
+/* ---------- state ---------- */
+var DEFAULT_CHECKLIST=["Toolbox talk signed","Hazards and work area checked","Work area protected","Debris removed","Photos taken","Weather and temperature logged"];
+var HOLD_DEFAULT=["Spec and addenda received","Submittals approved","Existing elevations surveyed","GPR / post-tension scan done","Garbage and chute plan agreed","Scarify to CSP7 accepted","Repairs measured and signed by consultant","Proposed elevations approved by consultant","Topping poured and curing","Moisture and dew point checked before PUMA","PUMA applied and cured","Doors, stairs and card reader done","Final inspection and punch list"];
+var READ_TYPES=["Concrete","Moisture","Dew point","CSP / surface","Elevation / slope","PUMA","Repair","Other"];
+var TAGS=["Before","During","After","Issue"];
+var TABS=[["home","EFE"],["notes","Notes"],["schedule","Schedule"],["projects","Projects"],["files","Project files"],["gallery","Project gallery"],["search","Search"],["options","Options"],["export","Export"]];
+var LS="efe-sitediary-v1";
+var IDB=null,docs={},blobs={},persist="loading",readyFile=null,installEvt=null;
+var tab="home",curDate=today(),curProject=null,galFilter="all",galTag="all",expState={from:"",to:"",project:"all",photos:false};
+
+function settings(){
+  var d=docs.settings||{};
+  return {name:d.name||"Efe",season:d.season||"2026 - 2027",checklist:Array.isArray(d.checklist)?d.checklist:DEFAULT_CHECKLIST.slice(),theme:d.theme||"light",activeProject:d.activeProject||null,lastBackup:d.lastBackup||0};
+}
+function entries(kind){
+  return Object.keys(docs).filter(function(id){return docs[id]&&docs[id].kind===kind}).map(function(id){return Object.assign({},docs[id],{id:id})});
+}
+function projects(){return entries("project").sort(function(a,b){return (a.created||0)-(b.created||0)})}
+function allLogs(){return entries("log").sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:(b.updated||0)-(a.updated||0)})}
+function allPhotos(){return entries("photo").sort(function(a,b){return (b.ts||0)-(a.ts||0)})}
+function activeProject(){
+  var ps=projects().filter(function(p){return !p.archived});
+  var id=curProject||settings().activeProject;
+  return ps.filter(function(p){return p.id===id})[0]||ps[0]||null;
+}
+function projName(id){var p=docs[id];return p&&p.name?p.name:"Unknown project"}
+function uid8(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+
+/* ---------- toast / helpers ---------- */
+var tt;
+function toast(m){var t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(function(){t.hidden=true},2800)}
+function errMsg(e){
+  if(e&&(e.name==="QuotaExceededError"||e.code===22))return "The phone is out of storage space. Free some space and try again.";
+  return "Could not save. Try again.";
+}
+function arm(label,fn){
+  var t,b=h("button",{class:"btn small danger",type:"button"},label);
+  b.addEventListener("click",function(){
+    if(b.classList.contains("armed")){clearTimeout(t);fn();}
+    else{b.classList.add("armed");b.textContent="Tap again";t=setTimeout(function(){b.classList.remove("armed");b.textContent=label},2500);}
+  });
+  return b;
+}
+
+/* ---------- storage: IndexedDB on this phone ---------- */
+var chains={},assets=null,dl=null,persistedState="unknown";
+function setPersist(p){persist=p;var s=$("#sync");if(s)s.textContent=(p==="saved"?"saved on phone":p==="saving"?"saving":p==="error"?"not saved":"loading")+(typeof syLabel==="function"?syLabel():"")}
+function idbOpen(){
+  return new Promise(function(res,rej){
+    var r=indexedDB.open("efe-sitediary",2);
+    r.onupgradeneeded=function(){var d=r.result;["docs","blobs","files"].forEach(function(n){if(!d.objectStoreNames.contains(n))d.createObjectStore(n)})};
+    r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)};
+  });
+}
+function idbAll(store){
+  return new Promise(function(res,rej){
+    var out={},r=IDB.transaction(store).objectStore(store).openCursor();
+    r.onsuccess=function(){var c=r.result;if(c){out[c.key]=c.value;c.continue()}else res(out)};
+    r.onerror=function(){rej(r.error)};
+  });
+}
+function idbPut(store,key,val){
+  return new Promise(function(res,rej){
+    var tx=IDB.transaction(store,"readwrite");tx.objectStore(store).put(val,key);
+    tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};tx.onabort=function(){rej(tx.error)};
+  });
+}
+function idbDel(store,key){
+  return new Promise(function(res,rej){
+    var tx=IDB.transaction(store,"readwrite");tx.objectStore(store).delete(key);
+    tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};tx.onabort=function(){rej(tx.error)};
+  });
+}
+function idbGet(store,key){
+  return new Promise(function(res){
+    if(!IDB)return res(null);
+    var r=IDB.transaction(store).objectStore(store).get(key);
+    r.onsuccess=function(){res(r.result||null)};r.onerror=function(){res(null)};
+  });
+}
+function save(id,data){
+  docs[id]=data;scheduleRender();
+  if(!IDB)return Promise.resolve();
+  setPersist("saving");
+  var p=(chains[id]||Promise.resolve()).then(function(){return idbPut("docs",id,JSON.parse(JSON.stringify(data)))})
+    .then(function(){setPersist("saved");if(id!=="settings"&&id[0]!=="_")syncSoon()}).catch(function(e){setPersist("error");toast(errMsg(e))});
+  chains[id]=p;return p;
+}
+function remove(id){
+  delete docs[id];scheduleRender();
+  if(!IDB)return Promise.resolve();
+  var p=(chains[id]||Promise.resolve()).then(function(){return idbDel("docs",id)}).then(function(){if(id[0]!=="_")syncSoon()}).catch(function(e){toast(errMsg(e))});
+  chains[id]=p;return p;
+}
+function storeBlob(id,b){blobs[id]=URL.createObjectURL(b);return IDB?idbPut("blobs",id,b):Promise.resolve()}
+assets={
+  upload:function(blob){
+    var id="b_"+uid8();
+    return storeBlob(id,blob).then(function(){return {id:id,url:blobs[id],sizeBytes:blob.size,contentType:blob.type}});
+  },
+  delete:function(id){
+    var u=blobs[id];delete blobs[id];if(u){try{URL.revokeObjectURL(u)}catch(e){}}
+    return (IDB?idbDel("blobs",id):Promise.resolve()).then(function(){return {deleted:true}});
+  }
+};
+/* hand a file to the phone: share sheet first (Save to Files, AirDrop, mail), plain download as fallback */
+async function saveFile(req){
+  var blob=req.data instanceof Blob?req.data:new Blob([req.data]);
+  var file=new File([blob],req.filename,{type:blob.type||"application/octet-stream"});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file],title:req.filename});return {status:"saved"}}
+    catch(e){if(e&&e.name==="AbortError")throw {code:"declined"}}
+  }
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=req.filename;a.style.display="none";
+  document.body.append(a);a.click();
+  setTimeout(function(){a.remove();URL.revokeObjectURL(a.href)},4000);
+  return {status:"saved"};
+}
+dl={save:saveFile};
+function saveSettings(patch){return save("settings",Object.assign({kind:"settings"},docs.settings||{},patch))}
+
+/* ---------- logs ---------- */
+var logId=function(date,pid){return "log_"+date+"_"+pid};
+function blankLog(date,pid){
+  return {kind:"log",date:date,projectId:pid,items:settings().checklist.map(function(t){return {t:t,done:false}}),notes:"",temp:"",weather:"",crew:"",
+    toolbox:"",incident:"none",visitors:"",issues:"",readings:[],finished:false,finishedAt:null,updated:Date.now()};
+}
+function fullLog(date,pid){return Object.assign(blankLog(date,pid),docs[logId(date,pid)]||{})}
+function editLog(date,pid,fn){
+  var id=logId(date,pid),cur=JSON.parse(JSON.stringify(fullLog(date,pid)));
+  fn(cur);cur.updated=Date.now();return save(id,cur);
+}
+var pending={},noteTimer=null;
+function flush(){clearTimeout(noteTimer);var p=pending;pending={};Object.keys(p).forEach(function(k){p[k]()});}
+function bindText(el,date,pid,field){
+  el.addEventListener("input",function(){
+    pending[field]=function(){if(el.value!==(fullLog(date,pid)[field]||""))editLog(date,pid,function(c){c[field]=el.value})};
+    clearTimeout(noteTimer);noteTimer=setTimeout(flush,800);
+  });
+  el.addEventListener("blur",flush);
+}
+/* dew point (Magnus formula) */
+function dewPoint(t,rh){var g=Math.log(rh/100)+(17.62*t)/(243.12+t);return 243.12*g/(17.62-g)}
+var calc={t:"",rh:"",s:"",m:"3"};
+/* hold points live on the project document */
+function holdsOf(p){return Array.isArray(p&&p.holds)?p.holds:[]}
+function saveHolds(pid,holds){return save(pid,Object.assign({},docs[pid],{holds:holds}))}
+
+/* ---------- rendering ---------- */
+var rq=0,deferred=false,forceNext=false;
+function keepTyping(id){forceNext=true;setTimeout(function(){var n=document.getElementById(id);if(n)n.focus()},150)}
+function isEditing(){var a=document.activeElement;return !!(a&&a.matches&&a.matches("#view textarea,#view input[type=text],#view input[type=number]"))}
+function scheduleRender(){
+  if(rq)return;
+  rq=requestAnimationFrame(function(){rq=0;if(isEditing()&&!forceNext){deferred=true;return}forceNext=false;render()});
+}
+document.addEventListener("focusout",function(){
+  if(deferred){deferred=false;setTimeout(function(){if(!isEditing())render()},60)}
+});
+function closeDrawer(){document.body.classList.remove("drawer")}
+function go(t){flush();tab=t;closeDrawer();render();window.scrollTo(0,0)}
+var ICONS={
+  home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  notes:'<path d="M5 3h10l4 4v14H5z"/><path d="M8 11h8M8 15h8"/>',
+  projects:'<path d="M3 7h6l2 2h10v10H3z"/>',
+  gallery:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/>',
+  options:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+  export:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 21h14"/>',
+  bolt:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>',schedule:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',files:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
+};
+function icon(n){
+  var s=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  s.setAttribute("viewBox","0 0 24 24");s.setAttribute("aria-hidden","true");
+  try{s.innerHTML=ICONS[n]||""}catch(e){}
+  return s;
+}
+function buildTabs(){
+  var nav=$("#tabs");nav.replaceChildren();
+  TABS.forEach(function(t){nav.append(h("button",{class:"tab",type:"button","data-tab":t[0],onclick:function(){go(t[0])}},icon(t[0]),t[1]))});
+  var wide=function(){return window.matchMedia&&window.matchMedia("(min-width:900px)").matches};
+  $("#menuBtn").onclick=function(){if(wide())document.body.classList.remove("side-hidden");else document.body.classList.add("drawer")};
+  $("#collapse").onclick=function(){document.body.classList.add("side-hidden")};
+  $("#scrim").onclick=closeDrawer;
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeDrawer()});
+}
+function render(){
+  var v=$("#view");
+  document.documentElement.setAttribute("data-theme",settings().theme);
+  var tm=document.querySelector("meta[name=theme-color]");if(tm)tm.setAttribute("content",settings().theme==="dark"?"#141A19":"#FFFFFF");
+  document.querySelectorAll(".tab").forEach(function(b){
+    if(b.getAttribute("data-tab")===tab)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current");
+  });
+  var fn={home:viewHome,notes:viewNotes,projects:viewProjects,gallery:viewGallery,options:viewOptions,export:viewExport,search:viewSearch,schedule:viewSchedule,files:viewFiles}[tab]||viewHome;
+  v.replaceChildren.apply(v,[].concat(fn()));
+  var ap=activeProject();
+  $("#topTitle").textContent=ap?ap.name:"Site Diary";
+  setPersist(persist);
+}
+
+/* ---------- photos ---------- */
+async function shrink(file){
+  var MAX=1600;
+  try{
+    var bmp=await createImageBitmap(file);
+    var sc=Math.min(1,MAX/Math.max(bmp.width,bmp.height));
+    var c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);
+    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    var b=await new Promise(function(r){c.toBlob(r,"image/jpeg",0.82)});
+    if(b&&b.size) return b;
+  }catch(e){}
+  return file;
+}
+function uploadErr(e){
+  var c=e&&e.code;
+  if(c==="too_large") return "That photo is too large.";
+  if(c==="unsupported_type") return "That file type is not supported. Use JPG, PNG or WebP.";
+  if(c==="quota_or_state") return "Photo storage is full.";
+  if(c==="rate_limited") return "Too many uploads at once. Wait a moment.";
+  return "Could not upload the photo.";
+}
+async function addPhotos(files,ctx){
+  if(!assets){toast("Photo storage is not available in this view.");return}
+  var n=0;
+  for(var i=0;i<files.length;i++){
+    try{
+      var blob=await shrink(files[i]);
+      var type=blob.type||"image/jpeg";
+      var r=await assets.upload(blob,{type:type});
+      await save("ph_"+uid8(),{kind:"photo",asset:r.id,projectId:ctx.pid,date:ctx.date,note:ctx.note||"",tag:ctx.tag||"",ts:Date.now()});
+      n++;
+    }catch(e){toast(uploadErr(e))}
+  }
+  if(n)toast(n+(n>1?" photos":" photo")+" added");
+}
+function pickPhotos(ctx,camera){
+  var i=h("input",{type:"file",accept:"image/*",multiple:!camera,style:"display:none"});
+  if(camera)i.setAttribute("capture","environment");
+  document.body.append(i);
+  i.addEventListener("change",function(){var f=[].slice.call(i.files);i.remove();if(f.length)addPhotos(f,typeof ctx==="function"?ctx():ctx)});
+  i.click();
+}
+var blobUrl=function(id){return blobs[id]||""};
+
+/* ---------- shared pieces ---------- */
+function pageHead(title,sub){return h("div",{class:"page-head"},h("h1",{text:title}),sub?h("p",{text:sub}):null)}
+function addProject(name,addr){
+  name=(name||"").trim();
+  if(!name){toast("Enter a project name.");return}
+  var first=!projects().filter(function(p){return !p.archived}).length,id="proj_"+uid8();
+  save(id,{kind:"project",name:name,address:(addr||"").trim(),created:Date.now(),archived:false});
+  if(first){curProject=id;saveSettings({activeProject:id})}
+  toast("Project added");
+}
+function noProjectCard(){
+  var n=h("input",{type:"text",id:"np-name",placeholder:"e.g. Garbage room floor rehabilitation"});
+  var a=h("input",{type:"text",id:"np-addr",placeholder:"Street, city"});
+  return h("div",{class:"card"},
+    h("h2",{text:"Add your first project"}),
+    h("p",{class:"muted",style:"margin:0",text:"Every diary day, photo and export belongs to a project. You can change these details later."}),
+    h("label",{class:"f","for":"np-name"},"Project name",n),
+    h("label",{class:"f","for":"np-addr"},"Address",a),
+    h("div",{class:"row"},h("button",{class:"btn primary",type:"button",onclick:function(){addProject(n.value,a.value)}},"Add project")));
+}
+function openLog(date,pid){curDate=date;curProject=pid;go("notes")}
+function progress(l){var d=l.items.filter(function(i){return i.done}).length;return d+"/"+l.items.length}
+function logRow(l){
+  return h("div",{class:"item"},
+    h("button",{class:"main",type:"button",onclick:function(){openLog(l.date,l.projectId)}},
+      h("b",{class:"mono",text:fmt(l.date)+"  "+dow(l.date).slice(0,3)}),
+      h("span",{class:"muted small",text:projName(l.projectId)+" · checklist "+progress(l)})),
+    h("span",{class:"pill "+(l.finished?"ok":"open"),text:l.finished?"finished":"open"}));
+}
+
+function daySection(l){
+  return h("details",{class:"day"},
+    h("summary",{},h("span",{class:"mono",text:fmt(l.date)+"  "+dow(l.date).slice(0,3)}),h("span",{class:"pill "+(l.finished?"ok":"open"),text:l.finished?"finished":"open"})),
+    h("div",{class:"day-body"},
+      h("div",{class:"muted small",text:projName(l.projectId)+" · checklist "+progress(l)}),
+      h("div",{class:"row"},h("button",{class:"btn small",type:"button",onclick:function(){openLog(l.date,l.projectId)}},"Open day"))));
+}
+
+/* ---------- EFE (home) ---------- */
+function viewHome(){
+  var s=settings(),t=today(),ap=activeProject(),out=[];
+  out.push(h("div",{class:"hello"},h("h1",{text:"Welcome, "+s.name}),h("div",{class:"season",text:"Season "+s.season+"  ·  "+dow(t)+" "+fmt(t)})));
+  if(allLogs().length&&(Date.now()-(s.lastBackup||0))>7*864e5)out.push(h("div",{class:"banner"},"Your diary is stored only on this phone. ",h("button",{class:"btn small",type:"button",style:"margin-left:6px",onclick:function(){go("options")}},"Back up now")));
+  if(!ap){out.push(noProjectCard());return out}
+  var todayNotes=allNotes().filter(function(n){return n.projectId===ap.id&&n.date===t});
+  var pill=todayNotes.length?h("span",{class:"pill ok",text:todayNotes.length+(todayNotes.length===1?" note today":" notes today")}):h("span",{class:"pill",text:"no notes yet"});
+  out.push(h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Today"}),pill),
+    h("div",{},h("b",{text:ap.name}),ap.address?h("div",{class:"muted small",text:ap.address}):null),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary round",type:"button",onclick:function(){go("notes")}},icon("bolt"),"Write a note"),
+      assets?h("button",{class:"btn",type:"button",onclick:function(){pickPhotos({pid:ap.id,date:t},true)}},"Take photo"):null)));
+  out.push(scheduleHomeCard());
+  out.push(remindersCard(ap,true));
+  var holds=holdsOf(ap),hd=holds.filter(function(x){return x.done}).length,nextH=holds.filter(function(x){return !x.done})[0];
+  out.push(h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Hold points"}),holds.length?h("span",{class:"mono small muted",text:hd+"/"+holds.length+" done"}):null),
+    holds.length?h("div",{class:"bar"},h("i",{style:"width:"+Math.round(100*hd/holds.length)+"%"})):null,
+    holds.length?h("div",{class:"small",text:nextH?"Next: "+nextH.t:"All hold points are done."}):h("div",{class:"muted small",text:"Track the approvals you wait for before each step, such as the consultant's elevation sign-off."}),
+    h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:function(){go("projects")}},holds.length?"Open hold points":"Set up hold points"))));
+  var notesAll=allNotes();
+  out.push(h("div",{class:"stats"},
+    h("div",{class:"stat"},h("b",{text:notesAll.length}),h("span",{text:"notes"})),
+    h("div",{class:"stat"},h("b",{text:projects().filter(function(p){return !p.archived}).length}),h("span",{text:"active projects"})),
+    h("div",{class:"stat"},h("b",{text:allPhotos().length}),h("span",{text:"photos"}))));
+  var recent=notesAll.filter(function(n){return n.projectId===ap.id}).slice(0,5);
+  out.push(h("div",{class:"card"},h("h2",{text:"Recent notes"}),
+    recent.length?h("div",{class:"list"},recent.map(function(n){
+      var first=(n.text||"").split("\n")[0];if(first.length>90)first=first.slice(0,90)+"…";
+      return h("div",{class:"item"},h("button",{class:"main",type:"button",onclick:function(){go("notes")}},
+        h("b",{class:"mono",text:fmt(n.date)+"  "+clock(n.ts)}),
+        h("span",{class:"muted small",text:(n.where?n.where+" · ":"")+first})));
+    })):h("div",{class:"empty"},h("strong",{text:"No notes yet"}),"Open Notes and write the first one.")));
+  return out;
+}
+
+/* ---------- dew point check ---------- */
+function dewCard(onAdd){
+  var num=function(id,v,step){return h("input",{type:"number",id:id,inputmode:"decimal",step:step,value:v})};
+  var t=num("dp-t",calc.t,"0.1"),rh=num("dp-rh",calc.rh,"1"),s=num("dp-s",calc.s,"0.1"),m=num("dp-m",calc.m,"0.5");
+  var res=h("div",{class:"verdict",text:"Enter air temperature and humidity."}),last=null;
+  function upd(){
+    calc.t=t.value;calc.rh=rh.value;calc.s=s.value;calc.m=m.value;last=null;
+    var T=parseFloat(t.value),RH=parseFloat(rh.value),S=parseFloat(s.value),M=parseFloat(m.value);
+    if(isNaN(M))M=3;
+    if(isNaN(T)||isNaN(RH)||RH<=0||RH>100){res.className="verdict";res.textContent="Enter air temperature and humidity.";return}
+    var d=dewPoint(T,RH),p=["Air "+T+" °C","RH "+RH+" %"];
+    if(isNaN(S)){
+      res.className="verdict";res.textContent="Dew point "+d.toFixed(1)+" °C. Add the surface temperature to check the margin.";
+      p.push("dew point "+d.toFixed(1)+" °C");
+    }else{
+      var gap=S-d,ok=gap>=M;
+      p.push("surface "+S+" °C","dew point "+d.toFixed(1)+" °C","margin "+gap.toFixed(1)+" °C");
+      res.className="verdict "+(ok?"ok":"bad");
+      res.textContent="Dew point "+d.toFixed(1)+" °C. Surface is "+gap.toFixed(1)+" °C above it. "+(ok?"Meets the "+M+" °C margin.":"Below the "+M+" °C margin, hold off on coating.");
+    }
+    last=p.join(", ");
+  }
+  [t,rh,s,m].forEach(function(i){i.addEventListener("input",upd)});
+  upd();
+  return h("div",{style:"display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px"},
+    h("h3",{text:"Dew point check"}),
+    h("div",{class:"muted small",text:"The margin the product needs is on its data sheet. 3 °C is a common starting value."}),
+    h("div",{class:"calc"},
+      h("label",{class:"f","for":"dp-t"},"Air °C",t),h("label",{class:"f","for":"dp-rh"},"Humidity %",rh),
+      h("label",{class:"f","for":"dp-s"},"Surface °C",s),h("label",{class:"f","for":"dp-m"},"Margin °C",m)),
+    res,
+    h("div",{class:"row"},h("button",{class:"btn small",type:"button",onclick:function(){if(!last){toast("Enter air temperature and humidity first.");return}onAdd(last)}},"Add result to measurements")));
+}
+
+/* ---------- reminders (kept on the project, open until ticked) ---------- */
+function remsOf(p){return Array.isArray(p&&p.reminders)?p.reminders:[]}
+function saveRems(pid,r){return save(pid,Object.assign({},docs[pid],{reminders:r}))}
+function remindersCard(ap,full){
+  var pid=ap.id,list=remsOf(ap),t=today();
+  var open=list.map(function(r,i){return {r:r,i:i}}).filter(function(x){return full||!x.r.done});
+  if(!full)open=open.slice(0,6);
+  var rows=open.map(function(x){
+    var r=x.r,i=x.i,late=!r.done&&r.due&&r.due<t;
+    return h("div",{class:"check"+(r.done?" done":"")},
+      h("button",{class:"box",type:"button",role:"checkbox","aria-checked":String(!!r.done),"aria-label":r.t,onclick:function(){
+        var cur=remsOf(docs[pid]).slice();cur[i]=Object.assign({},cur[i],{done:!cur[i].done});saveRems(pid,cur)}},"✓"),
+      h("span",{class:"t",style:"padding:6px 0",text:r.t}),
+      r.due?h("span",{class:"pill "+(late?"open":""),text:(late?"overdue ":"")+fmt(r.due)}):null,
+      full?h("button",{class:"x",type:"button","aria-label":"Remove "+r.t,onclick:function(){
+        var cur=remsOf(docs[pid]).slice();cur.splice(i,1);saveRems(pid,cur)}},"×"):null);
+  });
+  var out=[h("div",{class:"card-head"},h("h2",{text:"Reminders"}),h("span",{class:"mono small muted",text:list.filter(function(r){return !r.done}).length+" open"}))];
+  if(rows.length){
+    out.push(h("div",{class:"thead"},h("span",{text:"Done"}),h("span",{text:"Reminder"})));
+    out.push(h("div",{class:"list"},rows));
+  }else out.push(h("div",{class:"muted small",text:full?"Nothing yet. Add what you must not forget, like a call to the consultant or a delivery to check.":"No open reminders."}));
+  if(full){
+    var tgt=pid,plist=projects().filter(function(p){return !p.archived}).map(function(p){return [p.id,p.name]});
+    var ti=h("input",{type:"text",id:"rem-t",placeholder:"New reminder","aria-label":"New reminder",onkeydown:function(e){if(e.key==="Enter")add()}});
+    var di=h("input",{type:"date",id:"rem-d","aria-label":"Due date"});
+    var add=function(){
+      var v=ti.value.trim();if(!v)return;keepTyping("rem-t");
+      toast("Reminder added: "+projName(tgt));saveRems(tgt,remsOf(docs[tgt]).concat([{i:"r_"+uid8()+Math.random().toString(36).slice(2,5),t:v,due:di.value||"",done:false,created:Date.now()}]));
+    };
+    out.push(h("label",{class:"f","for":"rem-p"},"Which project should this reminder be saved to?",sel(plist,pid,function(v){tgt=v},"rem-p")));
+    out.push(h("div",{class:"row"},h("div",{class:"grow"},ti),h("div",{style:"flex:0 0 160px"},di),h("button",{class:"btn",type:"button",onclick:add},"Add")));
+  }else{
+    out.push(h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:function(){curDate=today();go("notes")}},"Open reminders")));
+  }
+  return h("div",{class:"card"},out);
+}
+
+/* ---------- Notes (Şantiye Defteri) ---------- */
+var noteEdit=null,noteWhen="",noteWhere="",noteText="";
+function pad2(n){return n<10?"0"+n:""+n}
+function localInput(ts){var d=new Date(ts);return ymd(d)+"T"+pad2(d.getHours())+":"+pad2(d.getMinutes())}
+/* notes are separate records; old diary days are shown too so nothing written earlier is lost */
+function allNotes(){
+  var out=entries("note");
+  allLogs().forEach(function(l){
+    var parts=[];
+    if(l.notes)parts.push(l.notes);
+    if(l.visitors)parts.push("Visitors and instructions: "+l.visitors);
+    if(l.issues)parts.push("Delays and issues: "+l.issues);
+    if(parts.length)out.push({id:"legacy_"+l.id,legacy:true,kind:"note",projectId:l.projectId,date:l.date,ts:l.updated||new Date(l.date+"T12:00:00").getTime(),where:"",text:parts.join("\n\n")});
+  });
+  return out.sort(function(a,b){return ((b.ts||0)-(a.ts||0))||((b.created||0)-(a.created||0))});
+}
+function noteRow(n){
+  var head=h("div",{class:"note-h"},h("span",{class:"mono small",text:clock(n.ts)}),n.where?h("span",{class:"pill",text:n.where}):null,n.legacy?h("span",{class:"pill",text:"earlier diary"}):null);
+  var q=((n.where||"")+" "+(n.text||"")).toLowerCase();
+  if(noteEdit===n.id&&!n.legacy){
+    var w=h("input",{type:"text",value:n.where||"","aria-label":"Where"});
+    var t=h("textarea",{class:"short","aria-label":"Note",value:n.text||""});
+    return h("div",{class:"note","data-q":q},head,w,t,
+      h("div",{class:"row"},
+        h("button",{class:"btn primary small",type:"button",onclick:function(){
+          var v=t.value.trim();if(!v){toast("A note cannot be empty.");return}
+          noteEdit=null;forceNext=true;
+          save(n.id,Object.assign({},docs[n.id],{where:w.value.trim(),text:v}));
+        }},"Save"),
+        h("button",{class:"btn ghost small",type:"button",onclick:function(){noteEdit=null;render()}},"Cancel")));
+  }
+  return h("div",{class:"note","data-q":q},head,
+    h("div",{class:"note-t",text:n.text||""}),
+    n.legacy?null:h("div",{class:"note-a"},
+      h("button",{class:"btn ghost small",type:"button",onclick:function(){noteEdit=n.id;render()}},"Edit"),
+      arm("Delete",function(){remove(n.id)})));
+}
+function viewNotes(){
+  var ap=activeProject();
+  var out=[pageHead("Notes","Write what happens on site. Each note is saved with its date, time and place.")];
+  if(!ap)return out.concat([noProjectCard()]);
+  var pid=ap.id;
+  var activeList=projects().filter(function(p){return !p.archived}).map(function(p){return [p.id,p.name]});
+  if(!noteWhen)noteWhen=localInput(Date.now());
+  var mine=allNotes().filter(function(n){return n.projectId===pid});
+  var places=[];mine.forEach(function(n){if(n.where&&places.indexOf(n.where)<0)places.push(n.where)});
+  var whenIn=h("input",{type:"datetime-local",id:"n-when",value:noteWhen,"aria-label":"When",onchange:function(e){noteWhen=e.target.value}});
+  var whereIn=h("input",{type:"text",id:"n-where",list:"n-places",placeholder:"Where? e.g. Garbage room 1535, P1 level",value:noteWhere,"aria-label":"Where",oninput:function(e){noteWhere=e.target.value}});
+  var ta=h("textarea",{id:"n-text",class:"big",placeholder:"What happened? Work done, deliveries, what the consultant said, problems.",value:noteText,"aria-label":"Note",oninput:function(e){noteText=e.target.value}});
+  function addNote(){
+    if(rec){try{rec.stop()}catch(e){}}
+    var txt=noteText.trim();if(!txt){toast("Write the note first.");return}
+    var ts=noteWhen?new Date(noteWhen).getTime():Date.now();if(isNaN(ts))ts=Date.now();
+    save("note_"+uid8(),{kind:"note",projectId:pid,date:ymd(new Date(ts)),ts:ts,created:Date.now(),where:noteWhere.trim(),text:txt});
+    noteText="";noteWhen="";keepTyping("n-text");toast("Note added");
+  }
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"p-sel"},"Which project should this note be saved to?",sel(activeList,pid,function(v){curProject=v;saveSettings({activeProject:v});render()},"p-sel")),
+    h("div",{class:"row"},h("label",{class:"f grow","for":"n-where"},"Where",whereIn),h("label",{class:"f grow","for":"n-when"},"When",whenIn)),
+    h("datalist",{id:"n-places"},places.map(function(p){return h("option",{value:p})})),
+    ta,
+    h("div",{class:"row"},
+      h("button",{class:"btn primary round",type:"button",onclick:addNote},icon("bolt"),"Add note"),
+      h("button",{class:"btn",type:"button",id:"n-mic","aria-pressed":"false",onclick:function(e){toggleDictation(ta,e.currentTarget)}},icon("mic"),h("span",{text:"Dictate"})),
+      assets?h("button",{class:"btn",type:"button",onclick:function(){var tsv=noteWhen?new Date(noteWhen):new Date();pickPhotos(function(){return {pid:pid,date:ymd(isNaN(tsv)?new Date():tsv),note:[noteWhere.trim(),noteText.trim().slice(0,120)].filter(Boolean).join(": ")}},true)}},"Take photo"):null,
+      assets?h("button",{class:"btn",type:"button",onclick:function(){var tsv=noteWhen?new Date(noteWhen):new Date();pickPhotos(function(){return {pid:pid,date:ymd(isNaN(tsv)?new Date():tsv),note:[noteWhere.trim(),noteText.trim().slice(0,120)].filter(Boolean).join(": ")}},false)}},"Choose photos"):null)));
+  out.push(h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Timeline"}),h("span",{class:"mono small muted",text:mine.length+(mine.length===1?" note":" notes")})),
+    mine.length?h("input",{type:"text",id:"n-search",placeholder:"Search notes and places","aria-label":"Search notes",oninput:function(e){
+      var q=e.target.value.trim().toLowerCase();
+      document.querySelectorAll("#view .note").forEach(function(el){el.hidden=!!q&&el.getAttribute("data-q").indexOf(q)<0});
+    }}):null,
+    mine.length?null:h("div",{class:"empty"},h("strong",{text:"No notes yet"}),"Your notes will show here by day, newest first."),
+    (function(){
+      var els=[],last="";
+      mine.forEach(function(n){
+        if(n.date!==last){last=n.date;els.push(h("h3",{class:"dayt",text:dow(n.date)+" · "+fmt(n.date)}))}
+        els.push(noteRow(n));
+      });
+      return els;
+    })()));
+  return out;
+}
+
+/* ---------- Projects ---------- */
+function viewProjects(){
+  var out=[pageHead("Projects","Pick the active project. New diary days and photos go to it.")];
+  var n=h("input",{type:"text",id:"pr-name",placeholder:"Project name"});
+  var a=h("input",{type:"text",id:"pr-addr",placeholder:"Address (optional)"});
+  out.push(h("div",{class:"card"},h("h3",{text:"New project"}),
+    h("label",{class:"f","for":"pr-name"},"Name",n),h("label",{class:"f","for":"pr-addr"},"Address",a),
+    h("div",{class:"row"},h("button",{class:"btn primary",type:"button",onclick:function(){addProject(n.value,a.value)}},"Add project"))));
+  var ps=projects(),ap=activeProject(),logs=allLogs(),photos=allPhotos();
+  if(!ps.length){out.push(h("div",{class:"empty"},h("strong",{text:"No projects yet"}),"Add the first one above."));return out}
+  out.push(h("div",{class:"card"},h("div",{class:"list"},ps.map(function(p,i){
+    var nl=allNotes().filter(function(l){return l.projectId===p.id}).length,np=photos.filter(function(x){return x.projectId===p.id}).length;
+    var isActive=!!ap&&ap.id===p.id;
+    return h("div",{class:"item"},
+      h("span",{class:"num",text:i+1}),
+      h("button",{class:"box",type:"button",role:"radio","aria-checked":String(isActive),"aria-label":"Make "+p.name+" the active project",onclick:function(){
+        if(p.archived){toast("Unarchive it first.");return}
+        curProject=p.id;saveSettings({activeProject:p.id});
+      }},"✓"),
+      h("div",{class:"main"},h("b",{text:p.name+(p.archived?" (archived)":"")}),
+        p.address?h("div",{class:"muted small",text:p.address}):null,
+        h("div",{class:"mono small muted",text:nl+" days · "+np+" photos"})),
+      h("div",{class:"row"},
+        h("button",{class:"btn small ghost",type:"button",onclick:function(){save(p.id,Object.assign({},docs[p.id],{archived:!p.archived}))}},p.archived?"Unarchive":"Archive"),
+        arm("Delete",function(){
+          if(nl||np){toast("This project has entries. Archive it instead.");return}
+          remove(p.id);
+        })));
+  }))));
+  if(ap){out.push(holdsCard(ap))}
+  return out;
+}
+/* places: a fixed list per project, tapped into the note's "Nerede" field */
+function placesOf(p){return Array.isArray(p&&p.places)?p.places:[]}
+function savePlaces(pid,list){return save(pid,Object.assign({},docs[pid],{places:list}))}
+function placeChips(list,input){
+  if(!list.length)return null;
+  var wrap=h("div",{class:"chips"});
+  function mark(){[].forEach.call(wrap.children,function(c){c.setAttribute("aria-pressed",String(c.textContent===noteWhere))})}
+  list.forEach(function(p){wrap.append(h("button",{class:"chip",type:"button","aria-pressed":String(p===noteWhere),onclick:function(){noteWhere=(noteWhere===p?"":p);input.value=noteWhere;mark()}},p))});
+  input.addEventListener("input",mark);
+  return wrap;
+}
+function placesCard(ap){
+  var list=placesOf(ap);
+  var addIn=h("input",{type:"text",id:"pl-add",placeholder:"Add a new place, e.g. Garbage room 1535","aria-label":"New place",onkeydown:function(e){if(e.key==="Enter")addP()}});
+  function addP(){var v=addIn.value.trim();if(!v)return;var cur=placesOf(docs[ap.id]);if(cur.indexOf(v)>=0){toast("That place already exists.");return}keepTyping("pl-add");savePlaces(ap.id,cur.concat([v]))}
+  return h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Places"}),h("span",{class:"mono small muted",text:list.length+" yer"})),
+    h("div",{class:"small muted",text:"Write this project's places (room, level, zone)."}),
+    list.length?h("div",{class:"list"},list.map(function(x,i){
+      return h("div",{class:"check"},h("span",{class:"t",style:"padding:6px 0",text:x}),
+        h("button",{class:"x",type:"button","aria-label":x+" yerini sil",onclick:function(){savePlaces(ap.id,placesOf(docs[ap.id]).filter(function(_,j){return j!==i}))}},"×"));
+    })):h("div",{class:"empty"},h("strong",{text:"No places yet"}),"Add one below or start from a sample list."),
+    h("div",{class:"row"},h("div",{class:"grow"},addIn),h("button",{class:"btn",type:"button",onclick:addP},"Add"),
+      list.length?null:h("button",{class:"btn primary",type:"button",onclick:function(){savePlaces(ap.id,["Garbage room A","Garbage room B","P1 parking","Stairs","Shaft (chute)","Site entrance"])}},"Use the sample list")));
+}
+function holdsCard(ap){
+  var holds=holdsOf(ap),dn=holds.filter(function(x){return x.done}).length;
+  var addIn=h("input",{type:"text",id:"hp-add",placeholder:"Add a hold point",onkeydown:function(e){if(e.key==="Enter")addH()}});
+  function addH(){var v=addIn.value.trim();if(!v)return;saveHolds(ap.id,holdsOf(docs[ap.id]).concat([{i:"h_"+uid8()+Math.random().toString(36).slice(2,5),t:v,done:false,date:null}]))}
+  return h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Hold points"}),h("span",{class:"mono small muted",text:dn+"/"+holds.length+" done"})),
+    h("div",{class:"small muted",text:ap.name}),
+    holds.length?h("div",{class:"bar"},h("i",{style:"width:"+Math.round(100*dn/holds.length)+"%"})):null,
+    holds.length?h("div",{class:"list"},holds.map(function(x,i){
+      return h("div",{class:"hold"+(x.done?" done":"")},
+        h("button",{class:"box",type:"button",role:"checkbox","aria-checked":String(!!x.done),"aria-label":x.t,onclick:function(){
+          saveHolds(ap.id,holdsOf(docs[ap.id]).map(function(y,j){return j===i?Object.assign({},y,{done:!y.done,date:!y.done?today():null}):y}));
+        }},"✓"),
+        h("span",{class:"t",text:x.t}),
+        x.done&&x.date?h("span",{class:"when",text:fmt(x.date)}):null,
+        h("button",{class:"x",type:"button","aria-label":"Remove "+x.t,onclick:function(){saveHolds(ap.id,holdsOf(docs[ap.id]).filter(function(_,j){return j!==i}))}},"×"));
+    })):h("div",{class:"empty"},h("strong",{text:"No hold points yet"}),"Hold points are the approvals you wait for before the next step. Start from a standard list for this kind of job and edit it."),
+    h("div",{class:"row"},h("div",{class:"grow"},addIn),h("button",{class:"btn",type:"button",onclick:addH},"Add"),
+      holds.length?null:h("button",{class:"btn primary",type:"button",onclick:function(){saveHolds(ap.id,HOLD_DEFAULT.map(function(t){return {t:t,done:false,date:null}}))}},"Use standard list")));
+}
+
+/* ---------- dictation (browser speech recognition, Turkish) ---------- */
+var rec=null;
+function toggleDictation(ta,btn){
+  var lab=btn.querySelector("span");
+  if(rec){try{rec.stop()}catch(e){}return}
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){toast("Dictation is not available in this browser. Use the microphone key on your keyboard.");return}
+  var r=new SR();r.lang="en-US";r.continuous=true;r.interimResults=true;
+  var base=ta.value;if(base&&!/\s$/.test(base))base+=" ";
+  r.onresult=function(e){
+    var fin="",tmp="";
+    for(var i=0;i<e.results.length;i++){var t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t;else tmp+=t}
+    ta.value=base+fin+tmp;noteText=ta.value;
+  };
+  r.onerror=function(e){toast(e&&e.error==="not-allowed"?"Microphone permission was not granted.":"Dictation stopped.")};
+  r.onend=function(){rec=null;btn.setAttribute("aria-pressed","false");btn.classList.remove("rec");if(lab)lab.textContent="Dictate"};
+  try{r.start();rec=r;btn.setAttribute("aria-pressed","true");btn.classList.add("rec");if(lab)lab.textContent="Stop";toast("Speak and it turns into text.")}
+  catch(e){rec=null;toast("Could not start dictation.")}
+}
+
+/* ---------- photo markup: pen, circle, arrow; saved as a copy so the original stays ---------- */
+function openAnnotator(id){
+  var p=docs[id];if(!p)return;
+  var box=$("#lightbox"),img=new Image();
+  img.onload=function(){
+    var W=img.naturalWidth,H=img.naturalHeight,lw=Math.max(4,Math.round(Math.max(W,H)/190));
+    var cv=h("canvas",{class:"anno"});cv.width=W;cv.height=H;
+    var ctx=cv.getContext("2d"),strokes=[],cur=null,tool="pen",color="#E53935";
+    function draw(){
+      ctx.clearRect(0,0,W,H);ctx.drawImage(img,0,0,W,H);
+      strokes.concat(cur?[cur]:[]).forEach(function(s){
+        var pts=s.p,a=pts[0],b=pts[pts.length-1];
+        ctx.strokeStyle=s.c;ctx.lineWidth=lw;ctx.lineCap="round";ctx.lineJoin="round";ctx.beginPath();
+        if(s.t==="pen"){pts.forEach(function(q,i){i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])})}
+        else if(s.t==="circle"){ctx.ellipse((a[0]+b[0])/2,(a[1]+b[1])/2,Math.max(2,Math.abs(b[0]-a[0])/2),Math.max(2,Math.abs(b[1]-a[1])/2),0,0,Math.PI*2)}
+        else{
+          var ang=Math.atan2(b[1]-a[1],b[0]-a[0]),L=lw*6;
+          ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);
+          ctx.moveTo(b[0],b[1]);ctx.lineTo(b[0]-L*Math.cos(ang-0.45),b[1]-L*Math.sin(ang-0.45));
+          ctx.moveTo(b[0],b[1]);ctx.lineTo(b[0]-L*Math.cos(ang+0.45),b[1]-L*Math.sin(ang+0.45));
+        }
+        ctx.stroke();
+      });
+    }
+    function pos(e){var r=cv.getBoundingClientRect();return [(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]}
+    cv.addEventListener("pointerdown",function(e){e.preventDefault();try{cv.setPointerCapture(e.pointerId)}catch(x){}cur={t:tool,c:color,p:[pos(e)]};draw()});
+    cv.addEventListener("pointermove",function(e){if(cur){cur.p.push(pos(e));draw()}});
+    function end(){if(cur){if(cur.p.length>1||cur.t==="pen")strokes.push(cur);cur=null;draw()}}
+    cv.addEventListener("pointerup",end);cv.addEventListener("pointercancel",end);
+    draw();
+    var toolBtns=[],colBtns=[];
+    function setTool(t){tool=t;toolBtns.forEach(function(x){x[1].setAttribute("aria-pressed",String(x[0]===t))})}
+    function setColor(c){color=c;colBtns.forEach(function(x){x[1].setAttribute("aria-pressed",String(x[0]===c))})}
+    var toolRow=h("div",{class:"seg dark",role:"group","aria-label":"Tool"},[["pen","Pen"],["circle","Circle"],["arrow","Arrow"]].map(function(t){
+      var bt=h("button",{type:"button","aria-pressed":String(t[0]==="pen"),onclick:function(){setTool(t[0])}},t[1]);toolBtns.push([t[0],bt]);return bt}));
+    var colRow=h("div",{class:"row",style:"gap:8px"},[["#E53935","Red"],["#FDD835","Yellow"],["#1E88E5","Blue"]].map(function(c){
+      var bt=h("button",{type:"button",class:"sw","aria-label":c[1],"aria-pressed":String(c[0]===color),style:"background:"+c[0],onclick:function(){setColor(c[0])}});colBtns.push([c[0],bt]);return bt}));
+    box.replaceChildren(
+      cv,
+      h("div",{class:"row",style:"justify-content:center"},toolRow,colRow),
+      h("div",{class:"row",style:"justify-content:center"},
+        h("button",{class:"btn",type:"button",onclick:function(){strokes.pop();draw()}},"Undo"),
+        h("button",{class:"btn",type:"button",onclick:function(){strokes=[];draw()}},"Clear"),
+        h("button",{class:"btn primary",type:"button",onclick:function(){
+          if(!strokes.length){toast("Draw something on the photo first.");return}
+          try{
+            cv.toBlob(function(blob){
+              if(!blob){toast("Could not save the marked-up photo.");return}
+              addPhotos([blob],{pid:p.projectId,date:p.date,note:((p.note||"")+" (marked up)").trim(),tag:p.tag||""});
+              closeLightbox();
+            },"image/jpeg",0.88);
+          }catch(e){toast("Could not save the marked-up photo in this view.")}
+        }},"Save as a copy"),
+        h("button",{class:"btn steel",type:"button",onclick:function(){openLightbox(id)}},"Cancel")));
+  };
+  img.onerror=function(){toast("Could not open the photo.")};
+  img.src=blobUrl(p.asset);
+}
+
+/* ---------- gallery ---------- */
+function shotCard(p){
+  return h("div",{class:"shot"},
+    h("button",{class:"ph",type:"button","aria-label":"Open photo",onclick:function(){openLightbox(p.id)}},
+      h("img",{src:blobUrl(p.asset),alt:p.note||"Site photo",loading:"lazy"})),
+    h("div",{class:"meta"},
+      h("div",{class:"row",style:"gap:8px"},h("span",{class:"d",text:fmt(p.date)}),p.tag?h("span",{class:"pill tag",text:p.tag}):null),
+      h("b",{text:projName(p.projectId)}),
+      h("span",{class:"n",text:"notes: "+(p.note||"—")})));
+}
+function closeLightbox(){var b=$("#lightbox");b.hidden=true;b.replaceChildren()}
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!$("#lightbox").hidden)closeLightbox()});
+function openLightbox(id){
+  var p=docs[id];if(!p)return;
+  var box=$("#lightbox");
+  var note=h("input",{type:"text",id:"lb-note",value:p.note||"",placeholder:"Note for this photo","aria-label":"Note for this photo"});
+  var tagSel=sel([["","No tag"]].concat(TAGS.map(function(t){return [t,t]})),p.tag||"",function(){},"lb-tag");
+  tagSel.setAttribute("aria-label","Photo tag");
+  box.replaceChildren(
+    h("img",{src:blobUrl(p.asset),alt:p.note||"Site photo"}),
+    h("div",{class:"cap",text:fmt(p.date)+" · "+projName(p.projectId)+(p.tag?" · "+p.tag:"")}),
+    h("div",{class:"row",style:"width:min(100%,520px)"},
+      h("div",{class:"grow"},note),
+      h("div",{style:"flex:0 0 130px"},tagSel),
+      h("button",{class:"btn",type:"button",onclick:function(){save(id,Object.assign({},docs[id],{note:note.value.trim(),tag:tagSel.value}));toast("Saved")}},"Save")),
+    h("div",{class:"row"},
+      h("button",{class:"btn",type:"button",onclick:function(){openAnnotator(id)}},icon("pen"),"Mark up"),
+      arm("Delete photo",async function(){
+        try{if(assets)await assets.delete(p.asset)}catch(e){}
+        remove(id);closeLightbox();toast("Photo deleted");
+      }),
+      h("button",{class:"btn steel",type:"button",onclick:closeLightbox},"Close")));
+  box.hidden=false;
+}
+function viewGallery(){
+  var out=[pageHead("Project gallery","Site photos by project and date.")];
+  var ap=activeProject();
+  if(!ap){out.push(noProjectCard());return out}
+  var list=projects().filter(function(p){return !p.archived}).map(function(p){return [p.id,p.name]});
+  var dateIn=h("input",{type:"date",id:"g-date",value:today()});
+  var noteIn=h("input",{type:"text",id:"g-note",placeholder:"What does the photo show?"});
+  var pSel=sel(list,ap.id,function(){},"g-proj");
+  var tagIn=sel([["","No tag"]].concat(TAGS.map(function(t){return [t,t]})),"During",function(){},"g-tag");
+  var ctx=function(){return {pid:pSel.value,date:dateIn.value||today(),note:noteIn.value.trim(),tag:tagIn.value}};
+  out.push(h("div",{class:"card"},h("h3",{text:"Add photos"}),
+    h("div",{class:"row"},
+      h("label",{class:"f grow","for":"g-proj"},"Project",pSel),
+      h("label",{class:"f grow","for":"g-date"},"Date",dateIn),
+      h("label",{class:"f grow","for":"g-tag"},"Tag",tagIn)),
+    h("label",{class:"f","for":"g-note"},"Notes",noteIn),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",disabled:!assets,onclick:function(){pickPhotos(ctx,true)}},"Take photo"),
+      h("button",{class:"btn",type:"button",disabled:!assets,onclick:function(){pickPhotos(ctx,false)}},"Choose photos"))));
+  var all=projects().map(function(p){return [p.id,p.name]});
+  var photos=allPhotos().filter(function(p){return (galFilter==="all"||p.projectId===galFilter)&&(galTag==="all"||(p.tag||"")===galTag)});
+  out.push(h("div",{class:"row"},
+    h("label",{class:"f grow","for":"g-filter"},"Project",sel([["all","All projects"]].concat(all),galFilter,function(v){galFilter=v;render()},"g-filter")),
+    h("label",{class:"f grow","for":"g-ftag"},"Tag",sel([["all","All tags"]].concat(TAGS.map(function(t){return [t,t]})),galTag,function(v){galTag=v;render()},"g-ftag"))));
+  out.push(photos.length?h("div",{class:"grid"},photos.map(shotCard)):h("div",{class:"empty"},h("strong",{text:"No photos yet"}),"Photos you add appear here with their date, project and notes."));
+  return out;
+}
+
+/* ---------- options ---------- */
+function viewOptions(){
+  var s=settings(),out=[pageHead("Options","Your name, the season, the theme and your backups.")];var rb=readyBar();if(rb)out.push(rb);
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"o-name"},"Your name",h("input",{type:"text",id:"o-name",value:s.name,onchange:function(e){saveSettings({name:e.target.value.trim()||"Efe"})}})),
+    h("label",{class:"f","for":"o-season"},"Season shown on the home page",h("input",{type:"text",id:"o-season",value:s.season,onchange:function(e){saveSettings({season:e.target.value.trim()})}}))));
+  out.push(h("div",{class:"card"},h("h2",{text:"Appearance"}),
+    h("div",{class:"seg",role:"group","aria-label":"Theme"},[["light","Light"],["dark","Dark"],["auto","Auto"]].map(function(t){
+      return h("button",{type:"button","aria-pressed":String(s.theme===t[0]),onclick:function(){saveSettings({theme:t[0]})}},t[1]);
+    })),
+    h("div",{class:"muted small",text:"Auto follows your phone's light or dark setting."})));
+  out.push(storageCard());out.push(sheetCard());out.push(langCard());var ic=installCard();if(ic)out.push(ic);
+  return out;
+}
+
+/* ---------- export ---------- */
+function exportRange(){
+  var ds=allNotes().map(function(l){return l.date}).sort();
+  return {from:expState.from||ds[0]||today(),to:expState.to||ds[ds.length-1]||today()};
+}
+function filteredLogs(){
+  var r=exportRange();
+  /* export rows are notes, oldest first (name kept so the phone build still finds it) */
+  return allNotes().filter(function(l){return l.date>=r.from&&l.date<=r.to&&(expState.project==="all"||l.projectId===expState.project)}).reverse();
+}
+var INC={none:"None",near:"Near miss",incident:"Incident"};
+function buildCsv(list){
+  var q=function(v){return '"'+String(v==null?"":v).replace(/"/g,'""')+'"'};
+  var rows=[["Date","Weekday","Time","Project","Where","Note"]];
+  list.forEach(function(n){rows.push([fmt(n.date),dow(n.date),clock(n.ts),projName(n.projectId),n.where||"",n.text||""])});
+  return "\ufeff"+rows.map(function(r){return r.map(q).join(",")}).join("\r\n");
+}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function photoData(p){
+  return fetch(blobUrl(p.asset)).then(function(r){return r.ok?r.blob():null}).then(function(b){
+    if(!b)return null;
+    return new Promise(function(res){var fr=new FileReader();fr.onload=function(){res(fr.result)};fr.onerror=function(){res(null)};fr.readAsDataURL(b)});
+  }).catch(function(){return null});
+}
+async function buildReport(list,withPhotos){
+  var s=settings(),r=exportRange(),photos=allPhotos(),included=0,MAXP=30;
+  var projs={};list.forEach(function(l){projs[projName(l.projectId)]=1});
+  var o=['<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Şantiye Defteri</title>',
+    '<style>body{font:15px/1.5 Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:24px auto;padding:0 16px}h1{margin:0 0 4px;font-size:26px}h2{font-size:17px;margin:0;border-bottom:2px solid #222;padding-bottom:4px}h3{font-size:14px;margin:12px 0 2px;text-transform:uppercase;letter-spacing:.04em;color:#444}.meta{color:#555;margin:0 0 20px}section{margin:0 0 24px;break-inside:avoid}ul{list-style:none;padding:0;margin:6px 0}li{padding:1px 0}.n{white-space:pre-wrap;margin:4px 0}.s{color:#555;font-size:13px}.ph{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px}figure{margin:0}figure img{width:100%;display:block}figcaption{font-size:12px;color:#555}</style></head><body>',
+    '<h1>Şantiye Defteri</h1><p class="meta">'+esc(Object.keys(projs).join(" · "))+'<br>'+fmt(r.from)+' to '+fmt(r.to)+' · prepared by '+esc(s.name)+'</p>'];
+  if(expState.project!=="all"){
+    var hp=holdsOf(docs[expState.project]);
+    if(hp.length)o.push('<section><h2>Hold points</h2><ul>'+hp.map(function(x){return '<li>'+(x.done?'[x] ':'[ ] ')+esc(x.t)+(x.done&&x.date?' ('+fmt(x.date)+')':'')+'</li>'}).join("")+'</ul></section>');
+  }
+  var days=[],idx={};
+  list.forEach(function(n){var k=n.date+"|"+n.projectId;if(!idx[k]){idx[k]={date:n.date,projectId:n.projectId,notes:[]};days.push(idx[k])}idx[k].notes.push(n)});
+  days.forEach(function(d){d.notes.sort(function(a,b){return ((a.ts||0)-(b.ts||0))||((a.created||0)-(b.created||0))})});
+  for(var n=0;n<days.length;n++){
+    var l=days[n];
+    var dayPhotos=photos.filter(function(p){return p.date===l.date&&p.projectId===l.projectId});
+    o.push('<section><h2>'+fmt(l.date)+' '+esc(dow(l.date))+' · '+esc(projName(l.projectId))+'</h2>');
+    o.push('<ul>'+l.notes.map(function(x){return '<li><b>'+esc(clock(x.ts))+'</b>'+(x.where?' · '+esc(x.where):'')+'<div class="n">'+esc(x.text)+'</div></li>'}).join("")+'</ul>');
+    if(withPhotos&&dayPhotos.length){
+      var figs=[];
+      for(var k=0;k<dayPhotos.length&&included<MAXP;k++){
+        var d=await photoData(dayPhotos[k]);
+        if(d){included++;figs.push('<figure><img src="'+d+'" alt=""><figcaption>'+esc((dayPhotos[k].tag?dayPhotos[k].tag+'. ':'')+(dayPhotos[k].note||''))+'</figcaption></figure>')}
+      }
+      if(figs.length)o.push('<div class="ph">'+figs.join("")+'</div>');
+    }
+    o.push('<div class="s">'+(dayPhotos.length?dayPhotos.length+' photo'+(dayPhotos.length>1?'s':'')+' · ':'')+l.notes.length+(l.notes.length===1?' note':' notes')+'</div></section>');
+  }
+  o.push('</body></html>');
+  return {html:o.join(""),included:included};
+}
+function viewExport(){
+  var out=[pageHead("Export","Send the diary to your office or keep a copy.")];var rb=readyBar();if(rb)out.push(rb);
+  var r=exportRange(),list=filteredLogs();
+  var fromIn=h("input",{type:"date",id:"x-from",value:r.from,onchange:function(e){expState.from=e.target.value;render()}});
+  var toIn=h("input",{type:"date",id:"x-to",value:r.to,onchange:function(e){expState.to=e.target.value;render()}});
+  var all=[["all","All projects"]].concat(projects().map(function(p){return [p.id,p.name]}));
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"x-proj"},"Project",sel(all,expState.project,function(v){expState.project=v;render()},"x-proj")),
+    h("div",{class:"row"},h("label",{class:"f grow","for":"x-from"},"From",fromIn),h("label",{class:"f grow","for":"x-to"},"To",toIn)),
+    h("div",{class:"mono small",text:list.length+(list.length===1?" note":" notes")+" in range"}),
+    h("label",{class:"chk","for":"x-photos"},h("input",{type:"checkbox",id:"x-photos",checked:expState.photos,onchange:function(e){expState.photos=e.target.checked}}),"Include photos in the report (up to 30, larger file)"),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",disabled:!dl||!list.length,onclick:function(){doDownload("csv")}},"Prepare CSV (Excel)"),
+      h("button",{class:"btn",type:"button",disabled:!dl||!list.length,onclick:function(){doDownload("html")}},"Prepare report (HTML)")),
+    h("div",{class:"sheet-note",text:"The report lists every note with its time and place, plus hold points and photos. Open it in a browser to print or save as PDF."})));
+  return out;
+}
+
+/* ---------- Ara: tüm projelerde arama ---------- */
+var srchQ="";
+function viewSearch(){
+  var out=[pageHead("Search","Search notes, reminders, hold points and photo notes across all projects.")];
+  var box=h("div",{class:"list"});
+  function fill(){
+    var q=srchQ.trim().toLowerCase();box.replaceChildren();
+    if(q.length<2){box.append(h("div",{class:"muted small",text:"Type at least 2 letters."}));return}
+    var res=[],has=function(s){return String(s||"").toLowerCase().indexOf(q)>=0};
+    allNotes().forEach(function(n){if(has((n.where||"")+" "+(n.text||"")))res.push({k:"Note",ts:n.ts||0,pid:n.projectId,line:n.text||"",meta:fmt(n.date)+" · "+clock(n.ts)+(n.where?" · "+n.where:"")})});
+    projects().forEach(function(p){
+      remsOf(p).forEach(function(r){if(has(r.t))res.push({k:"Reminder",ts:0,pid:p.id,line:r.t,meta:(r.due?fmt(r.due):"tarihsiz")+(r.done?" · done":"")})});
+      holdsOf(p).forEach(function(x){if(has(x.t))res.push({k:"Hold point",ts:0,pid:p.id,line:x.t,meta:x.done?"bitti":"open"})});
+    });
+    allSched().forEach(function(x){if(has(x.t))res.push({k:"Schedule",ts:0,pid:x.pid,line:x.t,meta:fmt(x.date)+(x.time?" · "+x.time:"")+(x.done?" · done":"")})});
+    entries("file").forEach(function(f){if(has(f.name))res.push({k:"File",ts:f.ts||0,pid:f.projectId,line:f.name,meta:fmtSize(f.size||0)})});
+    allPhotos().forEach(function(ph){if(has((ph.note||"")+" "+(ph.tag||"")))res.push({k:"Photo",ts:ph.ts||0,pid:ph.projectId,line:ph.note||ph.tag||"(no note)",meta:fmt(ph.date)})});
+    res.sort(function(a,b){return b.ts-a.ts});
+    box.append(h("div",{class:"mono small muted",text:res.length+" results"+(res.length>80?" (showing the first 80)":"")}));
+    res.slice(0,80).forEach(function(r){
+      box.append(h("div",{class:"note"},h("div",{class:"note-h"},h("span",{class:"pill",text:r.k}),h("span",{class:"small muted",text:projName(r.pid)+" · "+r.meta})),h("div",{class:"note-t",text:r.line})));
+    });
+  }
+  var inp=h("input",{type:"text",id:"s-q",placeholder:"What are you looking for? e.g. crack, concrete, consultant","aria-label":"Search",value:srchQ,oninput:function(e){srchQ=e.target.value;fill()}});
+  fill();
+  out.push(h("div",{class:"card"},inp,box));
+  setTimeout(function(){var i=document.getElementById("s-q");if(i&&tab==="search")i.focus()},80);
+  return out;
+}
+/* ---------- Program: hangi projede ne zaman ne olacak ---------- */
+function schedOf(p){return Array.isArray(p&&p.schedule)?p.schedule:[]}
+function saveSched(pid,list){return save(pid,Object.assign({},docs[pid],{schedule:list}))}
+function allSched(){
+  var out=[];
+  projects().forEach(function(p){schedOf(p).forEach(function(x){out.push(Object.assign({},x,{pid:p.id,pname:p.name,archived:!!p.archived}))})});
+  return out.sort(function(a,b){return ((a.date||"")+(a.time||"99:99")).localeCompare((b.date||"")+(b.time||"99:99"))});
+}
+function schedRow(x){
+  var late=!x.done&&x.date<today();
+  return h("div",{class:"check"+(x.done?" done":"")},
+    h("button",{class:"box",type:"button",role:"checkbox","aria-checked":String(!!x.done),"aria-label":x.t,onclick:function(){
+      saveSched(x.pid,schedOf(docs[x.pid]).map(function(y){return y.i===x.i?Object.assign({},y,{done:!y.done}):y}));
+    }},"✓"),
+    h("span",{class:"t",style:"padding:6px 0"},h("b",{text:(x.time?x.time+"  ":"")}),x.t,h("div",{class:"muted small",text:x.pname})),
+    h("span",{class:"pill "+(late?"open":""),text:fmt(x.date)}),
+    h("button",{class:"x",type:"button","aria-label":x.t+" delete",onclick:function(){
+      saveSched(x.pid,schedOf(docs[x.pid]).filter(function(y){return y.i!==x.i}));
+    }},"×"));
+}
+function viewSchedule(){
+  var out=[pageHead("Schedule","What is happening on which project and when? Pours, deliveries, meetings, inspections.")];
+  var ps=projects().filter(function(p){return !p.archived});
+  if(!ps.length)return out.concat([noProjectCard()]);
+  var ap=activeProject(),tgt=ap?ap.id:ps[0].id;
+  var plist=ps.map(function(p){return [p.id,p.name]});
+  var di=h("input",{type:"date",id:"sc-d",value:today(),"aria-label":"Date"});
+  var ti=h("input",{type:"time",id:"sc-t","aria-label":"Time"});
+  var tx=h("input",{type:"text",id:"sc-x",placeholder:"What is happening? e.g. Concrete pour, consultant visit, material delivery","aria-label":"What is happening",onkeydown:function(e){if(e.key==="Enter")add()}});
+  function add(){
+    var v=tx.value.trim();if(!v){toast("Write what is happening.");return}
+    if(!di.value){toast("Pick a date.");return}
+    keepTyping("sc-x");
+    toast("Added to schedule: "+projName(tgt));
+    saveSched(tgt,schedOf(docs[tgt]).concat([{i:"s_"+uid8()+Math.random().toString(36).slice(2,5),t:v,date:di.value,time:ti.value||"",done:false,created:Date.now()}]));
+  }
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"sc-p"},"Which project?",sel(plist,tgt,function(v){tgt=v},"sc-p")),
+    h("div",{class:"row"},h("label",{class:"f grow","for":"sc-d"},"Date",di),h("label",{class:"f","for":"sc-t"},"Time (optional)",ti)),
+    h("div",{class:"row"},h("div",{class:"grow"},tx),h("button",{class:"btn primary",type:"button",onclick:add},"Add"))));
+  var all=allSched(),t=today();
+  var up=all.filter(function(x){return x.date>=t||!x.done}).filter(function(x){return !x.archived});
+  var past=all.filter(function(x){return x.date<t&&x.done}).reverse().slice(0,30);
+  var body=[],last="";
+  up.forEach(function(x){
+    if(x.date!==last){last=x.date;body.push(h("h3",{class:"dayt",text:(x.date===t?"Today · ":"")+dow(x.date)+" · "+fmt(x.date)}))}
+    body.push(schedRow(x));
+  });
+  out.push(h("div",{class:"card"},h("div",{class:"card-head"},h("h2",{text:"Upcoming schedule"}),h("span",{class:"mono small muted",text:up.length+" entries"})),
+    up.length?body:h("div",{class:"empty"},h("strong",{text:"Schedule is empty"}),"Add the first entry above."),
+  ));
+  if(past.length)out.push(h("details",{class:"card"},h("summary",{text:"Past ("+past.length+")"}),h("div",{class:"list"},past.map(schedRow))));
+  return out;
+}
+function scheduleHomeCard(){
+  var t=today(),end=ymd(new Date(Date.now()+7*864e5));
+  var list=allSched().filter(function(x){return !x.archived&&!x.done&&x.date<=end}).slice(0,8);
+  return h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Schedule (7 days)"}),h("span",{class:"mono small muted",text:list.length+" entries"})),
+    list.length?h("div",{class:"list"},list.map(schedRow)):h("div",{class:"muted small",text:"Nothing planned in the next 7 days."}),
+    h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:function(){go("schedule")}},"Open schedule")));
+}
+/* ---------- Proje dosyaları: PDF paftalar, şartname, resimler ---------- */
+var fileProj=null,fileView=null;
+function filesOf(pid){return entries("file").filter(function(f){return f.projectId===pid}).sort(function(a,b){return (b.ts||0)-(a.ts||0)})}
+function fmtSize(n){return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB"}
+async function addFiles(list,pid){
+  var n=0;
+  for(var i=0;i<list.length;i++){
+    var f=list[i];
+    try{
+      var id="file_"+uid8()+Math.random().toString(36).slice(2,4);
+      await idbPut("files",id,f);
+      await save(id,{kind:"file",projectId:pid,name:f.name||"dosya",size:f.size||0,type:f.type||"application/pdf",ts:Date.now()});
+      n++;
+    }catch(e){toast(errMsg(e))}
+  }
+  if(n)toast(n+" files added");
+}
+function pickFiles(pid){
+  var i=h("input",{type:"file",accept:"application/pdf,image/*,.pdf",multiple:true,style:"display:none"});
+  document.body.append(i);
+  i.addEventListener("change",function(){var f=[].slice.call(i.files);i.remove();if(f.length)addFiles(f,pid)});
+  i.click();
+}
+function closeFileView(){
+  if(fileView){try{URL.revokeObjectURL(fileView.url)}catch(e){}fileView.el.remove();fileView=null}
+}
+async function openFileDoc(id){
+  var d=docs[id],b=await idbGet("files",id);
+  if(!b){toast("This file was not found on this phone.");return}
+  closeFileView();
+  var typed=b.type?b:new Blob([b],{type:d.type||"application/pdf"});
+  var url=URL.createObjectURL(typed),isImg=/^image\//.test(typed.type);
+  var body=isImg?h("img",{src:url,alt:d.name,style:"max-width:100%;display:block;margin:0 auto"}):h("iframe",{src:url,title:d.name,style:"width:100%;height:100%;border:0;background:#fff"});
+  var el=h("div",{style:"position:fixed;inset:0;z-index:60;background:var(--bg,#fff);display:flex;flex-direction:column"},
+    h("div",{class:"row",style:"padding:10px 12px;border-bottom:1px solid var(--line,#ccc);align-items:center"},
+      h("b",{class:"grow",style:"overflow:hidden;text-overflow:ellipsis;white-space:nowrap",text:d.name}),
+      h("a",{class:"btn primary small",href:url,target:"_blank",rel:"noopener",text:"Open in new tab"}),
+      h("button",{class:"btn small",type:"button",onclick:function(){saveFile({filename:d.name,data:typed})}},"Share / download"),
+      h("button",{class:"btn ghost small",type:"button",onclick:closeFileView},"Close")),
+    h("div",{style:"flex:1;overflow:auto;-webkit-overflow-scrolling:touch"},body));
+  document.body.append(el);fileView={el:el,url:url};
+}
+function viewFiles(){
+  var out=[pageHead("Project files","Add drawings, specs and other PDFs to the project and open them on site. Files stay on this phone only.")];
+  var ps=projects().filter(function(p){return !p.archived});
+  if(!ps.length)return out.concat([noProjectCard()]);
+  var ap=activeProject();
+  if(!fileProj||!docs[fileProj])fileProj=ap?ap.id:ps[0].id;
+  var plist=ps.map(function(p){return [p.id,p.name]});
+  var list=filesOf(fileProj);
+  out.push(h("div",{class:"card"},
+    h("label",{class:"f","for":"fl-p"},"Project",sel(plist,fileProj,function(v){fileProj=v;render()},"fl-p")),
+    h("div",{class:"row"},h("button",{class:"btn primary",type:"button",onclick:function(){pickFiles(fileProj)}},"Add file (PDF / image)"))));
+  out.push(h("div",{class:"card"},
+    h("div",{class:"card-head"},h("h2",{text:"Files"}),h("span",{class:"mono small muted",text:list.length+" files"})),
+    list.length?h("div",{class:"list"},list.map(function(f){
+      return h("div",{class:"item"},
+        h("button",{class:"main",type:"button",onclick:function(){openFileDoc(f.id)}},
+          h("b",{text:f.name}),h("span",{class:"muted small",text:fmtSize(f.size||0)+" · "+fmt(ymd(new Date(f.ts||Date.now())))})),
+        h("div",{class:"row"},
+          h("button",{class:"btn small",type:"button",onclick:function(){openFileDoc(f.id)}},"Open"),
+          arm("Delete",function(){remove(f.id);idbDel("files",f.id)})));
+    })):h("div",{class:"empty"},h("strong",{text:"No files yet"}),"Add a drawing or spec PDF above.")));
+  return out;
+}
+/* ---------- Dil / Language ---------- */
+function curLang(){var l="tr";try{l=localStorage.getItem("efe-lang")||"tr"}catch(e){}return l}
+function langCard(){
+  var cur=curLang();
+  function pick(l){
+    if(l===cur)return;
+    try{localStorage.setItem("efe-lang",l)}catch(e){toast("Could not save the language.");return}
+    location.reload();
+  }
+  return h("div",{class:"card"},h("h3",{text:"Dil / Language"}),
+    h("div",{class:"muted small",text:"App language"}),
+    h("div",{class:"row"},
+      h("button",{class:"btn"+(cur==="tr"?" primary":""),type:"button","aria-pressed":String(cur==="tr"),onclick:function(){pick("tr")}},"Türkçe"),
+      h("button",{class:"btn"+(cur==="en"?" primary":""),type:"button","aria-pressed":String(cur==="en"),onclick:function(){pick("en")}},"English")));
+}
+
+/* ---------- Google Sheet eşitleme ---------- */
+var SY={busy:false,again:false,timer:null,applying:false,last:0,err:"",live:false};
+var SYT=["projects","notes","reminders","schedule","holds","places","photos"];
+var SYF={projects:["name","address","archived"],notes:["date","time","project","where","text"],reminders:["project","text","due","done"],schedule:["project","text","date","time","done"],holds:["project","text","done","date"],places:["project","text"],photos:["date","project","note","tag","url"]};
+function syCfg(){var c=docs._cfg;return c&&c.url&&c.key?c:null}
+function syMeta(){var m=docs._meta||{};return {known:m.known||{},placeIds:m.placeIds||{}}}
+function syQuiet(id,data){docs[id]=data;return IDB?idbPut("docs",id,JSON.parse(JSON.stringify(data))).catch(function(){}):Promise.resolve()}
+function syS(v){return v==null?"":String(v).trim()}
+function syP2(n){return (n<10?"0":"")+n}
+function syHM(ts){var d=new Date(ts||0);return syP2(d.getHours())+":"+syP2(d.getMinutes())}
+function syHash(t,rec){
+  var s=JSON.stringify(SYF[t].map(function(f){return rec[f]})),x=5381;
+  for(var i=0;i<s.length;i++)x=((x*33)^s.charCodeAt(i))>>>0;
+  return x.toString(36)+":"+s.length;
+}
+function syPlaceId(pid,t,m){return m.placeIds[pid+"|"+t]||"pl_"+pid+"_"+t}
+function syLabel(){
+  if(!syCfg())return "";
+  return SY.busy?" · Sheet syncing":SY.err?" · Sheet error":SY.last?" · Sheet ✓":"";
+}
+function syPaint(){setPersist(persist);if(tab==="options")scheduleRender()}
+function syBackupDocs(){var o={};Object.keys(docs).forEach(function(k){if(k[0]!=="_"&&!(docs[k]&&docs[k].kind==="file"))o[k]=docs[k]});return o}
+
+function syFlatten(){
+  var out={projects:{},notes:{},reminders:{},schedule:{},holds:{},places:{},photos:{}},m=syMeta();
+  var nm=function(pid){return docs[pid]&&docs[pid].name?syS(docs[pid].name):""};
+  Object.keys(docs).forEach(function(id){
+    var d=docs[id];if(!d||id[0]==="_")return;
+    if(d.kind==="project"){
+      var pn=syS(d.name);
+      out.projects[id]={name:pn,address:syS(d.address),archived:!!d.archived};
+      remsOf(d).forEach(function(r){if(r.i)out.reminders[r.i]={project:pn,text:syS(r.t),due:syS(r.due),done:!!r.done}});
+      schedOf(d).forEach(function(x){if(x.i)out.schedule[x.i]={project:pn,text:syS(x.t),date:syS(x.date),time:syS(x.time),done:!!x.done}});
+      holdsOf(d).forEach(function(x){if(x.i)out.holds[x.i]={project:pn,text:syS(x.t),done:!!x.done,date:syS(x.date)}});
+      placesOf(d).forEach(function(t){out.places[syPlaceId(id,t,m)]={project:pn,text:syS(t)}});
+    }else if(d.kind==="note"){
+      out.notes[id]={date:syS(d.date),time:syHM(d.ts),project:nm(d.projectId),where:syS(d.where),text:syS(d.text)};
+    }else if(d.kind==="photo"&&d.url){
+      out.photos[id]={date:syS(d.date),project:nm(d.projectId),note:syS(d.note),tag:syS(d.tag),url:syS(d.url)};
+    }
+  });
+  return out;
+}
+
+async function syEnsureIds(){
+  var ids=Object.keys(docs);
+  for(var a=0;a<ids.length;a++){
+    var d=docs[ids[a]];if(!d||d.kind!=="project")continue;
+    var need=remsOf(d).some(function(r){return !r.i})||holdsOf(d).some(function(x){return !x.i})||schedOf(d).some(function(x){return !x.i});
+    if(!need)continue;
+    var nd=Object.assign({},d);
+    if(d.reminders)nd.reminders=d.reminders.map(function(r){return r.i?r:Object.assign({},r,{i:"r_"+uid8()+Math.random().toString(36).slice(2,5)})});
+    if(d.schedule)nd.schedule=d.schedule.map(function(x){return x.i?x:Object.assign({},x,{i:"s_"+uid8()+Math.random().toString(36).slice(2,5)})});
+    if(d.holds)nd.holds=d.holds.map(function(x){return x.i?x:Object.assign({},x,{i:"h_"+uid8()+Math.random().toString(36).slice(2,5)})});
+    SY.applying=true;try{await save(ids[a],nd)}finally{SY.applying=false}
+  }
+}
+
+async function syPost(cfg,req){
+  req.key=cfg.key;
+  var ctl=new AbortController(),to=setTimeout(function(){ctl.abort()},60000);
+  try{
+    var r=await fetch(cfg.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(req),signal:ctl.signal});
+    return await r.json();
+  }finally{clearTimeout(to)}
+}
+function syErrText(e){
+  var m=String(e&&e.message||e||"");
+  if(m==="auth")return "Wrong key. Get the connection info again from the EFE menu in the Sheet.";
+  if(/abort|Failed to fetch|NetworkError|Load failed/i.test(m))return "Could not reach the Sheet (internet or address).";
+  return "Sync error: "+m;
+}
+
+async function syUploadPhotos(cfg){
+  var ids=Object.keys(docs).filter(function(id){var d=docs[id];return d&&d.kind==="photo"&&!d.url}),n=0;
+  for(var i=0;i<ids.length&&n<4;i++){
+    var d=docs[ids[i]],b=await idbGet("blobs",d.asset);
+    if(!b)continue;
+    var url=await blobToDataURL(b);if(!url)continue;
+    var r=await syPost(cfg,{action:"photo",id:ids[i],mime:b.type||"image/jpeg",data:url.split(",")[1]});
+    if(!r.ok)throw new Error(r.error||"foto");
+    SY.applying=true;try{await save(ids[i],Object.assign({},docs[ids[i]],{url:r.url,driveId:r.fileId}))}finally{SY.applying=false}
+    n++;
+  }
+}
+
+function syProjId(name){
+  name=syS(name);
+  var ps=projects();
+  if(name){
+    var low=name.toLowerCase(),hit=ps.filter(function(p){return syS(p.name).toLowerCase()===low})[0];
+    if(hit)return hit.id;
+    var id="proj_"+uid8()+Math.random().toString(36).slice(2,4);
+    save(id,{kind:"project",name:name,address:"",created:Date.now(),archived:false});
+    return id;
+  }
+  var ap=activeProject();return ap?ap.id:null;
+}
+function syFindItem(key,id){
+  var ps=projects();
+  for(var i=0;i<ps.length;i++){
+    var l=Array.isArray(docs[ps[i].id][key])?docs[ps[i].id][key]:[];
+    for(var j=0;j<l.length;j++)if(l[j].i===id)return {pid:ps[i].id,idx:j};
+  }
+  return null;
+}
+function syPutItem(key,pid,id,item){
+  var f=syFindItem(key,id);
+  if(f&&f.pid!==pid){
+    var o=docs[f.pid],ol=o[key].filter(function(x){return x.i!==id});
+    save(f.pid,Object.assign({},o,(function(){var z={};z[key]=ol;return z})()));
+  }
+  var p=docs[pid],l=Array.isArray(p[key])?p[key].slice():[],ix=-1;
+  l.forEach(function(x,j){if(x.i===id)ix=j});
+  if(ix>=0)l[ix]=Object.assign({},l[ix],item);else l.push(item);
+  var z={};z[key]=l;save(pid,Object.assign({},p,z));
+}
+function syApply(t,id,r){
+  var d=docs[id];
+  if(t==="projects"){
+    save(id,Object.assign({created:Date.now(),places:[],holds:[],reminders:[]},d||{},{kind:"project",name:r.name||(d&&d.name)||"Project",address:r.address,archived:!!r.archived}));
+  }else if(t==="notes"){
+    var pid=syProjId(r.project);if(!pid||!/^\d{4}-\d\d-\d\d$/.test(r.date))return;
+    var ts=d&&d.ts&&d.date===r.date&&syHM(d.ts)===(r.time||"00:00")?d.ts:new Date(r.date+"T"+(r.time||"00:00")+":00").getTime();
+    if(isNaN(ts))return;
+    save(id,Object.assign({},d||{},{kind:"note",projectId:pid,date:r.date,ts:ts,created:(d&&d.created)||Date.now(),where:r.where,text:r.text}));
+  }else if(t==="reminders"){
+    var p1=syProjId(r.project);if(!p1||!r.text)return;
+    var o1=syFindItem("reminders",id),old=o1?docs[o1.pid].reminders[o1.idx]:null;
+    syPutItem("reminders",p1,id,{i:id,t:r.text,due:r.due,done:!!r.done,created:(old&&old.created)||Date.now()});
+  }else if(t==="schedule"){
+    var p4=syProjId(r.project);if(!p4||!r.text||!/^\d{4}-\d\d-\d\d$/.test(r.date))return;
+    var o4=syFindItem("schedule",id),old4=o4?docs[o4.pid].schedule[o4.idx]:null;
+    syPutItem("schedule",p4,id,{i:id,t:r.text,date:r.date,time:r.time,done:!!r.done,created:(old4&&old4.created)||Date.now()});
+  }else if(t==="holds"){
+    var p2=syProjId(r.project);if(!p2||!r.text)return;
+    syPutItem("holds",p2,id,{i:id,t:r.text,done:!!r.done,date:r.date||null});
+  }else if(t==="places"){
+    var p3=syProjId(r.project);if(!p3||!r.text)return;
+    var m=syMeta(),list=placesOf(docs[p3]).slice(),oldT=null;
+    list.forEach(function(x){if(syPlaceId(p3,x,m)===id)oldT=x});
+    if(oldT!==null&&oldT!==r.text){list=list.map(function(x){return x===oldT?r.text:x});delete m.placeIds[p3+"|"+oldT]}
+    else if(list.indexOf(r.text)<0)list.push(r.text);
+    m.placeIds[p3+"|"+r.text]=id;
+    docs._meta=Object.assign({},docs._meta||{},{placeIds:m.placeIds});
+    save(p3,Object.assign({},docs[p3],{places:list}));
+  }else if(t==="photos"){
+    if(!d)return;
+    save(id,Object.assign({},d,{date:r.date||d.date,note:r.note,tag:r.tag,url:r.url||d.url}));
+  }
+}
+function syDelete(t,id){
+  if(t==="projects")return;
+  if(t==="notes"){if(docs[id])remove(id)}
+  else if(t==="reminders"||t==="holds"||t==="schedule"){
+    var key=t,f=syFindItem(key,id);if(!f)return;
+    var o=docs[f.pid],z={};z[key]=o[key].filter(function(x){return x.i!==id});save(f.pid,Object.assign({},o,z));
+  }else if(t==="places"){
+    var ps=projects(),m=syMeta();
+    ps.forEach(function(p){
+      placesOf(p).forEach(function(x){if(syPlaceId(p.id,x,m)===id)save(p.id,Object.assign({},docs[p.id],{places:placesOf(docs[p.id]).filter(function(y){return y!==x})}))});
+    });
+  }else if(t==="photos"){
+    var d=docs[id];if(d){remove(id);if(d.asset)assets.delete(d.asset)}
+  }
+}
+
+async function syncNow(){
+  var cfg=syCfg();if(!cfg||!IDB&&false)return;
+  if(SY.busy){SY.again=true;return}
+  SY.busy=true;SY.err="";syPaint();
+  try{
+    await syEnsureIds();
+    await syUploadPhotos(cfg);
+    var known=syMeta().known,loc=syFlatten(),req={action:"sync",ops:{}};
+    SYT.forEach(function(t){
+      var kt=known[t]||{},up=[],rm=[];
+      Object.keys(loc[t]).forEach(function(id){if(kt[id]!==syHash(t,loc[t][id]))up.push(Object.assign({id:id},loc[t][id]))});
+      Object.keys(kt).forEach(function(id){if(!(id in loc[t]))rm.push(id)});
+      req.ops[t]={upsert:up,remove:rm};
+    });
+    var res=await syPost(cfg,req);
+    if(!res.ok)throw new Error(res.error||"bilinmeyen");
+    var dels=[],apps=[];
+    SYT.forEach(function(t){
+      var remote={};(res.state[t]||[]).forEach(function(r){remote[r.id]=r});
+      var del={};((res.deleted&&res.deleted[t])||[]).forEach(function(id){del[id]=1});
+      var kt=known[t]||{},lt=loc[t],empty=!Object.keys(remote).length;
+      Object.keys(lt).forEach(function(id){
+        if(remote[id])return;
+        if(del[id]||(id in kt&&!empty))dels.push([t,id]);
+      });
+      Object.keys(remote).forEach(function(id){
+        var r=remote[id];
+        if(!(id in lt)){if(!(id in kt))apps.push([t,id,r]);return}
+        if(syHash(t,r)!==syHash(t,lt[id])&&kt[id]===syHash(t,lt[id]))apps.push([t,id,r]);
+      });
+    });
+    SY.applying=true;
+    try{
+      apps.sort(function(a,b){return SYT.indexOf(a[0])-SYT.indexOf(b[0])});
+      apps.forEach(function(x){syApply(x[0],x[1],x[2])});
+      dels.forEach(function(x){syDelete(x[0],x[1])});
+    }finally{SY.applying=false}
+    var fin=syFlatten(),nk={};
+    SYT.forEach(function(t){
+      nk[t]={};
+      var inRemote={};(res.state[t]||[]).forEach(function(r){inRemote[r.id]=1});
+      Object.keys(fin[t]).forEach(function(id){if(inRemote[id])nk[t][id]=syHash(t,fin[t][id])});
+    });
+    await syQuiet("_meta",Object.assign({},docs._meta||{},{known:nk,placeIds:syMeta().placeIds,at:Date.now()}));
+    SY.last=Date.now();SY.err="";
+  }catch(e){SY.err=syErrText(e)}
+  SY.busy=false;syPaint();
+  if(SY.again){SY.again=false;if(!SY.err)syncSoon(500)}
+}
+function syncSoon(ms){
+  if(!syCfg()||SY.applying)return;
+  clearTimeout(SY.timer);SY.timer=setTimeout(syncNow,ms||2500);
+}
+function syInit(){
+  if(SY.live)return;SY.live=true;
+  document.addEventListener("visibilitychange",function(){if(!document.hidden)syncNow()});
+  window.addEventListener("online",function(){syncNow()});
+  setInterval(function(){if(!document.hidden)syncNow()},60000);
+  syncNow();
+}
+
+function sheetCard(){
+  var cfg=syCfg();
+  var urlIn=h("input",{type:"url",id:"sy-url",placeholder:"https://script.google.com/macros/s/…/exec","aria-label":"Connection address",value:cfg?cfg.url:"",autocapitalize:"off",autocomplete:"off"});
+  var keyIn=h("input",{type:"password",id:"sy-key",placeholder:"Key","aria-label":"Key",value:cfg?cfg.key:"",autocapitalize:"off",autocomplete:"off"});
+  var last=SY.last||(docs._meta&&docs._meta.at)||0;
+  var st=!cfg?"Not connected.":SY.busy?"Syncing…":SY.err?SY.err:"Connected. Last sync: "+(last?syP2(new Date(last).getHours())+":"+syP2(new Date(last).getMinutes()):"none yet");
+  async function connect(){
+    var u=urlIn.value.trim(),k=keyIn.value.trim();
+    if(!/^https:\/\/script\.google\.com\//.test(u)||!k){toast("Paste the address and the key.");return}
+    toast("Connecting…");
+    try{
+      var r=await syPost({url:u,key:k},{action:"ping"});
+      if(!r.ok)throw new Error(r.error||"bilinmeyen");
+      await syQuiet("_cfg",{url:u,key:k});SY.err="";
+      toast("Connected. Running the first sync…");syPaint();syncNow();
+    }catch(e){toast(syErrText(e))}
+  }
+  return h("div",{class:"card"},h("h3",{text:"Google Sheet connection"}),
+    h("p",{class:"muted small",style:"margin:0",text:"Once connected, your notes, reminders, schedule and hold points are written to your Google Sheet, and rows you add or fix in the Sheet come back into the app. Photos are uploaded to the EFE folder in your Drive. The address and key stay on this phone only."}),
+    h("div",{class:"mono small",text:st}),
+    h("label",{class:"f","for":"sy-url"},"Connection address",urlIn),
+    h("label",{class:"f","for":"sy-key"},"Key",keyIn),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",onclick:connect},cfg?"Update and connect":"Connect"),
+      cfg?h("button",{class:"btn",type:"button",onclick:function(){syncNow();toast("Syncing…")}},"Sync now"):null,
+      cfg?arm("Disconnect",function(){delete docs._cfg;delete docs._meta;if(IDB){idbDel("docs","_cfg");idbDel("docs","_meta")}SY.err="";SY.last=0;syPaint();toast("Disconnected. Your data is still on this phone.")}):null));
+}
+
+/* ---------- downloads: build the file, then save from a fresh tap ---------- */
+async function doDownload(kind){
+  var list=filteredLogs();
+  if(!list.length){toast("Nothing to export in this range.");return}
+  var r=exportRange(),base="sitediary_"+r.from+"_to_"+r.to;
+  try{
+    if(kind==="csv"){
+      var b=new Blob([buildCsv(list)],{type:"text/csv"});
+      readyFile={filename:base+".csv",data:b,size:b.size,kind:"export",note:""};
+    }else{
+      if(expState.photos)toast("Preparing the report with photos…");
+      var rep=await buildReport(list,expState.photos);
+      var hb=new Blob([rep.html],{type:"text/html"});
+      readyFile={filename:base+".html",data:hb,size:hb.size,kind:"export",note:expState.photos?rep.included+(rep.included===1?" photo included":" photos included"):""};
+    }
+    render();
+  }catch(e){toast("Could not build the file.")}
+}
+function readyBar(){
+  if(!readyFile)return null;
+  var f=readyFile;
+  return h("div",{class:"card"},
+    h("h3",{text:"File ready"}),
+    h("div",{class:"mono small",text:f.filename+" · "+Math.max(1,Math.round(f.size/1024))+" KB"}),
+    f.note?h("div",{class:"small muted",text:f.note}):null,
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",onclick:function(){
+        saveFile(f).then(function(){
+          readyFile=null;toast("File saved.");
+          if(f.kind==="backup")saveSettings({lastBackup:Date.now()});else render();
+        }).catch(function(e){if(e&&e.code==="declined")return;toast("Could not save the file.")});
+      }},"Save or share file"),
+      h("button",{class:"btn ghost",type:"button",onclick:function(){readyFile=null;render()}},"Dismiss")));
+}
+
+/* ---------- backup and restore ---------- */
+function blobToDataURL(b){return new Promise(function(res){var fr=new FileReader();fr.onload=function(){res(fr.result)};fr.onerror=function(){res(null)};fr.readAsDataURL(b)})}
+async function makeBackup(withPhotos){
+  toast(withPhotos?"Preparing backup with photos…":"Preparing backup…");
+  var out={app:"efe-sitediary",version:1,created:new Date().toISOString(),docs:syBackupDocs(),photos:[]};
+  if(withPhotos){
+    var ids=allPhotos().map(function(p){return p.asset});
+    for(var i=0;i<ids.length;i++){
+      var b=await idbGet("blobs",ids[i]);
+      var d=b?await blobToDataURL(b):null;
+      if(d)out.photos.push({id:ids[i],data:d});
+    }
+  }
+  var blob=new Blob([JSON.stringify(out)],{type:"text/plain"});
+  readyFile={filename:"efe-backup-"+today()+(withPhotos?"-with-photos":"")+".json",data:blob,size:blob.size,kind:"backup",note:withPhotos?out.photos.length+" photos included":"Entries only, no photos"};
+  render();
+}
+function pickRestore(){
+  var i=h("input",{type:"file",accept:"application/json,.json,text/plain",style:"display:none"});
+  document.body.append(i);
+  i.addEventListener("change",async function(){
+    var f=i.files[0];i.remove();if(!f)return;
+    try{
+      var j=JSON.parse(await f.text());
+      if(!j||j.app!=="efe-sitediary"||!j.docs)throw new Error("not a backup");
+      var n=0,p=0,ids=Object.keys(j.docs);
+      for(var a=0;a<ids.length;a++){await save(ids[a],j.docs[ids[a]]);n++}
+      var ph=j.photos||[];
+      for(var k=0;k<ph.length;k++){var r=await fetch(ph[k].data);await storeBlob(ph[k].id,await r.blob());p++}
+      render();toast("Restored "+n+" entries and "+p+" photos.");
+    }catch(e){toast("That file is not an EFE backup.")}
+  });
+  i.click();
+}
+function storageCard(){
+  var last=settings().lastBackup;
+  return h("div",{class:"card"},h("h3",{text:"Storage and backup"}),
+    h("p",{class:"muted small",style:"margin:0",text:"Entries and photos are stored on this phone only. If you clear the browser data, delete the app or lose the phone, they are gone. Back up often."}),
+    h("div",{class:"mono small",text:allLogs().length+" diary days · "+allPhotos().length+" photos · last backup: "+(last?fmt(ymd(new Date(last))):"never")}),
+    h("div",{class:"mono small muted",text:"Protected storage: "+persistedState}),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",onclick:function(){makeBackup(false)}},"Back up (no photos)"),
+      h("button",{class:"btn",type:"button",onclick:function(){makeBackup(true)}},"Back up with photos"),
+      h("button",{class:"btn ghost",type:"button",onclick:pickRestore},"Restore from file")));
+}
+function installCard(){
+  var standalone=(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches)||navigator.standalone;
+  if(standalone)return null;
+  return h("div",{class:"card"},h("h3",{text:"Install on your phone"}),
+    h("div",{class:"small",text:"iPhone: open this page in Safari, tap Share, then Add to Home Screen."}),
+    h("div",{class:"small",text:"Android: open it in Chrome, tap the menu, then Install app."}),
+    installEvt?h("div",{class:"row"},h("button",{class:"btn primary",type:"button",onclick:function(){installEvt.prompt();installEvt=null;render()}},"Install app")):null);
+}
+
+/* ---------- boot ---------- */
+async function boot(){
+  buildTabs();render();
+  try{
+    IDB=await idbOpen();
+    docs=await idbAll("docs");
+    var bl=await idbAll("blobs");
+    Object.keys(bl).forEach(function(k){blobs[k]=URL.createObjectURL(bl[k])});
+    setPersist("saved");
+  }catch(e){
+    IDB=null;setPersist("error");
+    toast("This browser cannot store data. Entries are lost when you close the app.");
+  }
+  render();
+  try{
+    if(navigator.storage&&navigator.storage.persist){
+      var ok=await navigator.storage.persist();persistedState=ok?"yes":"no";
+    }
+  }catch(e){}
+  if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){
+    navigator.serviceWorker.register("sw.js").catch(function(){});
+  }
+  window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();installEvt=e;if(tab==="options")render()});
+  syInit();if(window.__EFE_TEST)window.__EFE_TEST.api={sync:syncNow,sy:SY,addPhotos:addPhotos,makeBackup:makeBackup,docs:function(){return docs},blobs:function(){return blobs},ready:function(){return readyFile}};
+}
+boot();
+})();
+</script>
+<script>(function(){var l="tr";try{l=localStorage.getItem("efe-lang")||"tr"}catch(e){}if(l!=="en")l="tr";document.documentElement.lang=l;var s=document.createElement("script");s.textContent=document.getElementById("js-"+l).textContent;document.body.appendChild(s)})();</script>
 
 </body>
 </html>

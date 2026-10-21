@@ -587,7 +587,6 @@ function viewHome(){
       h("button",{class:"btn primary round",type:"button",onclick:function(){go("notes")}},icon("bolt"),"Not yaz"),
       assets?h("button",{class:"btn",type:"button",onclick:function(){pickPhotos({pid:ap.id,date:t},true)}},"Fotoğraf çek"):null)));
   out.push(scheduleHomeCard());
-  out.push(remindersCard(ap,true));
   var holds=holdsOf(ap),hd=holds.filter(function(x){return x.done}).length,nextH=holds.filter(function(x){return !x.done})[0];
   out.push(h("div",{class:"card"},
     h("div",{class:"card-head"},h("h2",{text:"Onay noktaları"}),holds.length?h("span",{class:"mono small muted",text:hd+"/"+holds.length+" tamam"}):null),
@@ -996,7 +995,7 @@ function viewOptions(){
       return h("button",{type:"button","aria-pressed":String(s.theme===t[0]),onclick:function(){saveSettings({theme:t[0]})}},t[1]);
     })),
     h("div",{class:"muted small",text:"Otomatik, telefonunun açık ya da koyu ayarını izler."})));
-  out.push(storageCard());out.push(sheetCard());out.push(langCard());var ic=installCard();if(ic)out.push(ic);
+  out.push(storageCard());out.push(sheetCard());var nc=notifCard();if(nc)out.push(nc);out.push(langCard());var ic=installCard();if(ic)out.push(ic);
   return out;
 }
 
@@ -1084,7 +1083,6 @@ function viewSearch(){
     var res=[],has=function(s){return String(s||"").toLowerCase().indexOf(q)>=0};
     allNotes().forEach(function(n){if(has((n.where||"")+" "+(n.text||"")))res.push({k:"Not",ts:n.ts||0,pid:n.projectId,line:n.text||"",meta:fmt(n.date)+" · "+clock(n.ts)+(n.where?" · "+n.where:"")})});
     projects().forEach(function(p){
-      remsOf(p).forEach(function(r){if(has(r.t))res.push({k:"Hatırlatıcı",ts:0,pid:p.id,line:r.t,meta:(r.due?fmt(r.due):"tarihsiz")+(r.done?" · bitti":"")})});
       holdsOf(p).forEach(function(x){if(has(x.t))res.push({k:"Onay noktası",ts:0,pid:p.id,line:x.t,meta:x.done?"bitti":"açık"})});
     });
     allSched().forEach(function(x){if(has(x.t))res.push({k:"Program",ts:0,pid:x.pid,line:x.t,meta:fmt(x.date)+(x.time?" · "+x.time:"")+(x.done?" · bitti":"")})});
@@ -1499,6 +1497,38 @@ function sheetCard(){
       h("button",{class:"btn primary",type:"button",onclick:connect},cfg?"Güncelle ve bağlan":"Bağlan"),
       cfg?h("button",{class:"btn",type:"button",onclick:function(){syncNow();toast("Eşitleniyor…")}},"Şimdi eşitle"):null,
       cfg?arm("Bağlantıyı kes",function(){delete docs._cfg;delete docs._meta;if(IDB){idbDel("docs","_cfg");idbDel("docs","_meta")}SY.err="";SY.last=0;syPaint();toast("Bağlantı kesildi. Verilerin telefonda duruyor.")}):null));
+}
+
+/* ---------- bildirim ayarları (e-posta) ---------- */
+function syNotify(){var c=syCfg();return (c&&c.notify)||{on:false,email:"",hour:7}}
+async function syNotifyRefresh(){
+  var c=syCfg();if(!c||(SY.nrAt||0)>Date.now()-30000)return;SY.nrAt=Date.now();
+  try{var r=await syPost(c,{action:"ping"});if(r.ok&&r.notify){await syQuiet("_cfg",Object.assign({},docs._cfg,{notify:r.notify}));if(tab==="options")scheduleRender()}}catch(e){}
+}
+function notifCard(){
+  var c=syCfg();if(!c)return null;
+  syNotifyRefresh();
+  var n=syNotify(),on=!!n.on;
+  var em=h("input",{type:"email",id:"nt-mail",placeholder:"ornek@gmail.com","aria-label":"E-posta adresi",value:n.email||"",autocapitalize:"off",autocomplete:"off"});
+  var hr=sel([5,6,7,8,9,10].map(function(x){return [String(x),(x<10?"0":"")+x+":00"]}),String(n.hour||7),function(){},"nt-hour");
+  async function call(req,okMsg){
+    try{
+      var r=await syPost(c,req);
+      if(!r.ok)throw new Error(r.error||"bilinmeyen");
+      if(r.notify)await syQuiet("_cfg",Object.assign({},docs._cfg,{notify:r.notify}));
+      toast(okMsg(r));syPaint();
+    }catch(e){toast(syErrText(e))}
+  }
+  function save(next){call({action:"notify",enabled:next,email:em.value.trim(),hour:Number(hr.value)},function(){return next?"Bildirim açıldı.":"Bildirim kapatıldı."})}
+  return h("div",{class:"card"},h("h3",{text:"Bildirimler"}),
+    h("p",{class:"muted small",style:"margin:0",text:"Program kayıtların (bugün ve yarın) her sabah e-postana gelir. Telefonunda Gmail bildirimi açıksa bildirim olarak görünür. Önce Program sekmesine tarihli kayıt ekle."}),
+    h("div",{class:"mono small",text:on?"Bildirim: AÇIK":"Bildirim: KAPALI"}),
+    h("label",{class:"f","for":"nt-mail"},"E-posta adresi",em),
+    h("label",{class:"f","for":"nt-hour"},"Gönderim saati",hr),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button","aria-pressed":String(on),onclick:function(){save(!on)}},on?"Bildirimi kapat":"Bildirimi aç"),
+      h("button",{class:"btn",type:"button",onclick:function(){save(on)}},"Kaydet"),
+      h("button",{class:"btn",type:"button",onclick:function(){toast("Gönderiliyor…");call({action:"notifyTest",email:em.value.trim()},function(r){return "Test e-postası gönderildi: "+r.to+". Gelen kutusuna ve Spam'e bak."})}},"Test e-postası gönder")));
 }
 
 /* ---------- downloads: build the file, then save from a fresh tap ---------- */
@@ -1955,7 +1985,6 @@ function viewHome(){
       h("button",{class:"btn primary round",type:"button",onclick:function(){go("notes")}},icon("bolt"),"Write a note"),
       assets?h("button",{class:"btn",type:"button",onclick:function(){pickPhotos({pid:ap.id,date:t},true)}},"Take photo"):null)));
   out.push(scheduleHomeCard());
-  out.push(remindersCard(ap,true));
   var holds=holdsOf(ap),hd=holds.filter(function(x){return x.done}).length,nextH=holds.filter(function(x){return !x.done})[0];
   out.push(h("div",{class:"card"},
     h("div",{class:"card-head"},h("h2",{text:"Hold points"}),holds.length?h("span",{class:"mono small muted",text:hd+"/"+holds.length+" done"}):null),
@@ -2364,7 +2393,7 @@ function viewOptions(){
       return h("button",{type:"button","aria-pressed":String(s.theme===t[0]),onclick:function(){saveSettings({theme:t[0]})}},t[1]);
     })),
     h("div",{class:"muted small",text:"Auto follows your phone's light or dark setting."})));
-  out.push(storageCard());out.push(sheetCard());out.push(langCard());var ic=installCard();if(ic)out.push(ic);
+  out.push(storageCard());out.push(sheetCard());var nc=notifCard();if(nc)out.push(nc);out.push(langCard());var ic=installCard();if(ic)out.push(ic);
   return out;
 }
 
@@ -2452,7 +2481,6 @@ function viewSearch(){
     var res=[],has=function(s){return String(s||"").toLowerCase().indexOf(q)>=0};
     allNotes().forEach(function(n){if(has((n.where||"")+" "+(n.text||"")))res.push({k:"Note",ts:n.ts||0,pid:n.projectId,line:n.text||"",meta:fmt(n.date)+" · "+clock(n.ts)+(n.where?" · "+n.where:"")})});
     projects().forEach(function(p){
-      remsOf(p).forEach(function(r){if(has(r.t))res.push({k:"Reminder",ts:0,pid:p.id,line:r.t,meta:(r.due?fmt(r.due):"tarihsiz")+(r.done?" · done":"")})});
       holdsOf(p).forEach(function(x){if(has(x.t))res.push({k:"Hold point",ts:0,pid:p.id,line:x.t,meta:x.done?"bitti":"open"})});
     });
     allSched().forEach(function(x){if(has(x.t))res.push({k:"Schedule",ts:0,pid:x.pid,line:x.t,meta:fmt(x.date)+(x.time?" · "+x.time:"")+(x.done?" · done":"")})});
@@ -2867,6 +2895,38 @@ function sheetCard(){
       h("button",{class:"btn primary",type:"button",onclick:connect},cfg?"Update and connect":"Connect"),
       cfg?h("button",{class:"btn",type:"button",onclick:function(){syncNow();toast("Syncing…")}},"Sync now"):null,
       cfg?arm("Disconnect",function(){delete docs._cfg;delete docs._meta;if(IDB){idbDel("docs","_cfg");idbDel("docs","_meta")}SY.err="";SY.last=0;syPaint();toast("Disconnected. Your data is still on this phone.")}):null));
+}
+
+/* ---------- bildirim ayarları (e-posta) ---------- */
+function syNotify(){var c=syCfg();return (c&&c.notify)||{on:false,email:"",hour:7}}
+async function syNotifyRefresh(){
+  var c=syCfg();if(!c||(SY.nrAt||0)>Date.now()-30000)return;SY.nrAt=Date.now();
+  try{var r=await syPost(c,{action:"ping"});if(r.ok&&r.notify){await syQuiet("_cfg",Object.assign({},docs._cfg,{notify:r.notify}));if(tab==="options")scheduleRender()}}catch(e){}
+}
+function notifCard(){
+  var c=syCfg();if(!c)return null;
+  syNotifyRefresh();
+  var n=syNotify(),on=!!n.on;
+  var em=h("input",{type:"email",id:"nt-mail",placeholder:"ornek@gmail.com","aria-label":"E-mail address",value:n.email||"",autocapitalize:"off",autocomplete:"off"});
+  var hr=sel([5,6,7,8,9,10].map(function(x){return [String(x),(x<10?"0":"")+x+":00"]}),String(n.hour||7),function(){},"nt-hour");
+  async function call(req,okMsg){
+    try{
+      var r=await syPost(c,req);
+      if(!r.ok)throw new Error(r.error||"bilinmeyen");
+      if(r.notify)await syQuiet("_cfg",Object.assign({},docs._cfg,{notify:r.notify}));
+      toast(okMsg(r));syPaint();
+    }catch(e){toast(syErrText(e))}
+  }
+  function save(next){call({action:"notify",enabled:next,email:em.value.trim(),hour:Number(hr.value)},function(){return next?"Notifications turned on.":"Notifications turned off."})}
+  return h("div",{class:"card"},h("h3",{text:"Notifications"}),
+    h("p",{class:"muted small",style:"margin:0",text:"Your schedule entries (today and tomorrow) are e-mailed to you every morning. If Gmail notifications are on, you get a phone notification. Add dated entries in the Schedule tab first."}),
+    h("div",{class:"mono small",text:on?"Notifications: ON":"Notifications: OFF"}),
+    h("label",{class:"f","for":"nt-mail"},"E-mail address",em),
+    h("label",{class:"f","for":"nt-hour"},"Send time",hr),
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button","aria-pressed":String(on),onclick:function(){save(!on)}},on?"Turn off":"Turn on"),
+      h("button",{class:"btn",type:"button",onclick:function(){save(on)}},"Save"),
+      h("button",{class:"btn",type:"button",onclick:function(){toast("Sending…");call({action:"notifyTest",email:em.value.trim()},function(r){return "Test e-mail sent: "+r.to+". Check your inbox and Spam."})}},"Send test e-mail")));
 }
 
 /* ---------- downloads: build the file, then save from a fresh tap ---------- */

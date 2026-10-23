@@ -1508,9 +1508,10 @@ async function syNotifyRefresh(){
 function notifCard(){
   var c=syCfg();if(!c)return null;
   syNotifyRefresh();
-  var n=syNotify(),on=!!n.on;
+  var n=syNotify(),emOn=!!n.on,calOn=!!n.calendar;
   var em=h("input",{type:"email",id:"nt-mail",placeholder:"ornek@gmail.com","aria-label":"E-posta adresi",value:n.email||"",autocapitalize:"off",autocomplete:"off"});
   var hr=sel([5,6,7,8,9,10].map(function(x){return [String(x),(x<10?"0":"")+x+":00"]}),String(n.hour||7),function(){},"nt-hour");
+  var cm=sel([["0","Başlama anında"],["15","15 dakika önce"],["30","30 dakika önce"],["60","1 saat önce"],["120","2 saat önce"]],String(n.calMinutes==null?30:n.calMinutes),function(){},"nt-cmin");
   async function call(req,okMsg){
     try{
       var r=await syPost(c,req);
@@ -1519,15 +1520,25 @@ function notifCard(){
       toast(okMsg(r));syPaint();
     }catch(e){toast(syErrText(e))}
   }
-  function save(next){call({action:"notify",enabled:next,email:em.value.trim(),hour:Number(hr.value)},function(){return next?"Bildirim açıldı.":"Bildirim kapatıldı."})}
+  function saveAll(e2,c2){
+    call({action:"notify",enabled:e2,email:em.value.trim(),hour:Number(hr.value),calendar:c2,calMinutes:Number(cm.value)},function(){return "Kaydedildi."});
+  }
   return h("div",{class:"card"},h("h3",{text:"Bildirimler"}),
-    h("p",{class:"muted small",style:"margin:0",text:"Program kayıtların (bugün ve yarın) her sabah e-postana gelir. Telefonunda Gmail bildirimi açıksa bildirim olarak görünür. Önce Program sekmesine tarihli kayıt ekle."}),
-    h("div",{class:"mono small",text:on?"Bildirim: AÇIK":"Bildirim: KAPALI"}),
+    h("div",{class:"mono small",text:"Google Takvim: "+(calOn?"AÇIK":"KAPALI")}),
+    h("p",{class:"muted small",style:"margin:0",text:"Program kayıtların Google Takvim'ine etkinlik olarak yazılır. Telefon bildirimi Takvim uygulamasından gelir. Saatsiz kayıtlar sabah 08:00'de haber verir."}),
+    h("label",{class:"f","for":"nt-cmin"},"Ne zaman haber versin?",cm),
+    n.tz?h("div",{class:"muted small",text:"Saat dilimi: "+n.tz}):null,
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button","aria-pressed":String(calOn),onclick:function(){saveAll(emOn,!calOn)}},calOn?"Takvimi kapat":"Takvimi aç"),
+      h("button",{class:"btn",type:"button",onclick:function(){saveAll(emOn,calOn)}},"Kaydet"),
+      h("button",{class:"btn",type:"button",onclick:function(){toast("Gönderiliyor…");call({action:"calTest"},function(r){return "Test etkinliği eklendi. Saat "+r.at+" civarı telefona bildirim gelmeli."})}},"Takvim testi")),
+    h("hr",{style:"border:0;border-top:1px solid var(--line);margin:8px 0"}),
+    h("div",{class:"mono small",text:emOn?"E-posta özeti: AÇIK":"E-posta özeti: KAPALI"}),
+    h("p",{class:"muted small",style:"margin:0",text:"İstersen her sabah bugünün ve yarının programı e-postayla da gelir."}),
     h("label",{class:"f","for":"nt-mail"},"E-posta adresi",em),
     h("label",{class:"f","for":"nt-hour"},"Gönderim saati",hr),
     h("div",{class:"row"},
-      h("button",{class:"btn primary",type:"button","aria-pressed":String(on),onclick:function(){save(!on)}},on?"Bildirimi kapat":"Bildirimi aç"),
-      h("button",{class:"btn",type:"button",onclick:function(){save(on)}},"Kaydet"),
+      h("button",{class:"btn",type:"button","aria-pressed":String(emOn),onclick:function(){saveAll(!emOn,calOn)}},emOn?"E-postayı kapat":"E-postayı aç"),
       h("button",{class:"btn",type:"button",onclick:function(){toast("Gönderiliyor…");call({action:"notifyTest",email:em.value.trim()},function(r){return "Test e-postası gönderildi: "+r.to+". Gelen kutusuna ve Spam'e bak."})}},"Test e-postası gönder")));
 }
 
@@ -2906,9 +2917,10 @@ async function syNotifyRefresh(){
 function notifCard(){
   var c=syCfg();if(!c)return null;
   syNotifyRefresh();
-  var n=syNotify(),on=!!n.on;
+  var n=syNotify(),emOn=!!n.on,calOn=!!n.calendar;
   var em=h("input",{type:"email",id:"nt-mail",placeholder:"ornek@gmail.com","aria-label":"E-mail address",value:n.email||"",autocapitalize:"off",autocomplete:"off"});
   var hr=sel([5,6,7,8,9,10].map(function(x){return [String(x),(x<10?"0":"")+x+":00"]}),String(n.hour||7),function(){},"nt-hour");
+  var cm=sel([["0","At start time"],["15","15 minutes before"],["30","30 minutes before"],["60","1 hour before"],["120","2 hours before"]],String(n.calMinutes==null?30:n.calMinutes),function(){},"nt-cmin");
   async function call(req,okMsg){
     try{
       var r=await syPost(c,req);
@@ -2917,15 +2929,25 @@ function notifCard(){
       toast(okMsg(r));syPaint();
     }catch(e){toast(syErrText(e))}
   }
-  function save(next){call({action:"notify",enabled:next,email:em.value.trim(),hour:Number(hr.value)},function(){return next?"Notifications turned on.":"Notifications turned off."})}
+  function saveAll(e2,c2){
+    call({action:"notify",enabled:e2,email:em.value.trim(),hour:Number(hr.value),calendar:c2,calMinutes:Number(cm.value)},function(){return "Saved."});
+  }
   return h("div",{class:"card"},h("h3",{text:"Notifications"}),
-    h("p",{class:"muted small",style:"margin:0",text:"Your schedule entries (today and tomorrow) are e-mailed to you every morning. If Gmail notifications are on, you get a phone notification. Add dated entries in the Schedule tab first."}),
-    h("div",{class:"mono small",text:on?"Notifications: ON":"Notifications: OFF"}),
+    h("div",{class:"mono small",text:"Google Calendar: "+(calOn?"AÇIK":"KAPALI")}),
+    h("p",{class:"muted small",style:"margin:0",text:"Your schedule entries are written to Google Calendar as events. The phone notification comes from the Calendar app. Entries without a time notify at 08:00."}),
+    h("label",{class:"f","for":"nt-cmin"},"When should it notify?",cm),
+    n.tz?h("div",{class:"muted small",text:"Time zone: "+n.tz}):null,
+    h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button","aria-pressed":String(calOn),onclick:function(){saveAll(emOn,!calOn)}},calOn?"Turn Calendar off":"Turn Calendar on"),
+      h("button",{class:"btn",type:"button",onclick:function(){saveAll(emOn,calOn)}},"Save"),
+      h("button",{class:"btn",type:"button",onclick:function(){toast("Sending…");call({action:"calTest"},function(r){return "Test event added. Around "+r.at+" your phone should show a notification."})}},"Calendar test")),
+    h("hr",{style:"border:0;border-top:1px solid var(--line);margin:8px 0"}),
+    h("div",{class:"mono small",text:emOn?"E-mail summary: ON":"E-mail summary: OFF"}),
+    h("p",{class:"muted small",style:"margin:0",text:"If you like, today's and tomorrow's schedule is also e-mailed every morning."}),
     h("label",{class:"f","for":"nt-mail"},"E-mail address",em),
     h("label",{class:"f","for":"nt-hour"},"Send time",hr),
     h("div",{class:"row"},
-      h("button",{class:"btn primary",type:"button","aria-pressed":String(on),onclick:function(){save(!on)}},on?"Turn off":"Turn on"),
-      h("button",{class:"btn",type:"button",onclick:function(){save(on)}},"Save"),
+      h("button",{class:"btn",type:"button","aria-pressed":String(emOn),onclick:function(){saveAll(!emOn,calOn)}},emOn?"Turn e-mail off":"Turn e-mail on"),
       h("button",{class:"btn",type:"button",onclick:function(){toast("Sending…");call({action:"notifyTest",email:em.value.trim()},function(r){return "Test e-mail sent: "+r.to+". Check your inbox and Spam."})}},"Send test e-mail")));
 }
 
